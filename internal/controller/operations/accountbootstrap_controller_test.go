@@ -12,9 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
-	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 )
 
 const testOpenBaoRootKeyKind = "OpenBaoRootKey"
