@@ -16,6 +16,6 @@ OpenKCM provider integration for Platform Mesh Showroom.
 - Mock OpenKCM API server runs in the same pod
 
 ## CRDs
-- `Tenant` (governance.openkcm.io/v1alpha1) -- org level
+- `Tenant` (operations.openkcm.io/v1alpha1) -- org level
 - `DomainKey` (operations.openkcm.io/v1alpha1) -- account level
 - `ServiceKey` (operations.openkcm.io/v1alpha1) -- account level

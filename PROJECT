@@ -15,9 +15,9 @@ resources:
     namespaced: true
   controller: true
   domain: openkcm.io
-  group: governance
+  group: operations
   kind: Tenant
-  path: github.com/openkcm/openkcm-controller/api/governance/v1alpha1
+  path: github.com/openkcm/openkcm-controller/api/operations/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
