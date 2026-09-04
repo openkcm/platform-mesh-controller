@@ -78,6 +78,14 @@ spec:
               keyName:
                 description: KeyName is the OpenBao Transit key name.
                 type: string
+              lifecycle:
+                default: Active
+                description: Lifecycle is the user-desired key lifecycle. Defaults
+                  to Active.
+                enum:
+                - Active
+                - Deactivated
+                type: string
               serverAddress:
                 description: ServerAddress is the OpenBao API endpoint.
                 type: string

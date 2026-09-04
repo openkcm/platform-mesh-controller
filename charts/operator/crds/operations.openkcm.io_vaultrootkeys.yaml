@@ -4,25 +4,19 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: azurerootkeys.operations.openkcm.io
+  name: vaultrootkeys.operations.openkcm.io
 spec:
   group: operations.openkcm.io
   names:
-    kind: AzureRootKey
-    listKind: AzureRootKeyList
-    plural: azurerootkeys
-    singular: azurerootkey
+    kind: VaultRootKey
+    listKind: VaultRootKeyList
+    plural: vaultrootkeys
+    singular: vaultrootkey
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.tenantNameRef
       name: Tenant
-      type: string
-    - jsonPath: .spec.vaultUrl
-      name: Vault
-      type: string
-    - jsonPath: .status.cryptoState.lifecycleState
-      name: Lifecycle
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -34,8 +28,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          AzureRootKey is an L1 root-key binding to an Azure Key Vault key,
-          federated via Azure AD workload identity.
+          VaultRootKey is a stub L1 root-key for HashiCorp Vault Transit.
+          No controller wiring in v0.7.0.
         properties:
           apiVersion:
             description: |-
@@ -55,47 +49,34 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of AzureRootKey
+            description: spec defines the desired state of VaultRootKey
             properties:
-              federatedIdentity:
-                description: FederatedIdentity is the Azure AD workload-identity federation
-                  config.
-                properties:
-                  clientId:
-                    description: ClientID is the Azure AD application (client) ID.
-                    type: string
-                  tenantId:
-                    description: TenantID is the Azure AD tenant ID.
-                    type: string
-                required:
-                - clientId
-                - tenantId
-                type: object
               keyName:
-                description: KeyName is the Azure Key Vault key name.
+                description: KeyName is the Vault Transit key name.
                 type: string
-              keyVersion:
-                description: KeyVersion optionally pins a specific key version; empty
-                  pulls latest.
+              lifecycle:
+                default: Active
+                description: Lifecycle is the user-desired key lifecycle. Defaults
+                  to Active.
+                enum:
+                - Active
+                - Deactivated
+                type: string
+              serverAddress:
+                description: ServerAddress is the Vault API endpoint.
                 type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
                 type: string
-              vaultUrl:
-                description: VaultURL is the Azure Key Vault endpoint.
-                type: string
             required:
-            - federatedIdentity
-            - keyName
             - tenantNameRef
-            - vaultUrl
             type: object
           status:
-            description: status defines the observed state of AzureRootKey
+            description: status defines the observed state of VaultRootKey
             properties:
               conditions:
                 description: Conditions represent the latest available observations
-                  of the AzureRootKey's state.
+                  of the VaultRootKey's state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

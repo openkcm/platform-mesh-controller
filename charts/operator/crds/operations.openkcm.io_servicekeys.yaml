@@ -4,19 +4,25 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: gcprootkeys.operations.openkcm.io
+  name: servicekeys.operations.openkcm.io
 spec:
   group: operations.openkcm.io
   names:
-    kind: GCPRootKey
-    listKind: GCPRootKeyList
-    plural: gcprootkeys
-    singular: gcprootkey
+    kind: ServiceKey
+    listKind: ServiceKeyList
+    plural: servicekeys
+    singular: servicekey
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.tenantNameRef
       name: Tenant
+      type: string
+    - jsonPath: .spec.domainKeyRef
+      name: DomainKey
+      type: string
+    - jsonPath: .status.cryptoState.lifecycleState
+      name: Lifecycle
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -27,9 +33,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: |-
-          GCPRootKey is a stub L1 root-key for GCP KMS. No controller wiring in
-          v0.7.0 — present so DomainKey.spec.primaryRootKeyRef can accept the kind.
+        description: ServiceKey defines an encryption key request for a service consumer.
         properties:
           apiVersion:
             description: |-
@@ -49,25 +53,35 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of GCPRootKey
+            description: spec defines the desired state of ServiceKey
             properties:
-              keyUri:
+              domainKeyRef:
+                description: DomainKeyRef is the name of the parent DomainKey in the
+                  same workspace.
+                type: string
+              lifecycle:
+                default: Active
                 description: |-
-                  KeyURI is the GCP KMS resource name
-                  (e.g. projects/.../locations/.../keyRings/.../cryptoKeys/...).
+                  Lifecycle is the user-desired key lifecycle. Defaults to Active.
+                  Setting to Deactivated cascades to all Data Encryption Keys under
+                  this Service Key.
+                enum:
+                - Active
+                - Deactivated
                 type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
                 type: string
             required:
+            - domainKeyRef
             - tenantNameRef
             type: object
           status:
-            description: status defines the observed state of GCPRootKey
+            description: status defines the observed state of ServiceKey
             properties:
               conditions:
                 description: Conditions represent the latest available observations
-                  of the GCPRootKey's state.
+                  of the ServiceKey's state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

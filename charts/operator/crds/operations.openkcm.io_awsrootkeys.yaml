@@ -65,6 +65,17 @@ spec:
               keyUri:
                 description: KeyURI is the ARN of the upstream AWS KMS key.
                 type: string
+              lifecycle:
+                default: Active
+                description: |-
+                  Lifecycle is the user-desired key lifecycle. Defaults to Active.
+                  Setting to Deactivated triggers a deactivation roundtrip via the
+                  upstream KMS and cascades to all dependent DomainKeys (and their
+                  downstream ServiceKeys + Data Encryption Keys).
+                enum:
+                - Active
+                - Deactivated
+                type: string
               region:
                 description: Region is the AWS region hosting the KMS key.
                 type: string

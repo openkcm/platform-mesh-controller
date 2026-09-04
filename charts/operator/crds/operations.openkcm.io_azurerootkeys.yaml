@@ -4,19 +4,25 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: hsmrootkeys.operations.openkcm.io
+  name: azurerootkeys.operations.openkcm.io
 spec:
   group: operations.openkcm.io
   names:
-    kind: HSMRootKey
-    listKind: HSMRootKeyList
-    plural: hsmrootkeys
-    singular: hsmrootkey
+    kind: AzureRootKey
+    listKind: AzureRootKeyList
+    plural: azurerootkeys
+    singular: azurerootkey
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.tenantNameRef
       name: Tenant
+      type: string
+    - jsonPath: .spec.vaultUrl
+      name: Vault
+      type: string
+    - jsonPath: .status.cryptoState.lifecycleState
+      name: Lifecycle
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -27,8 +33,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HSMRootKey is a stub L1 root-key for a PKCS#11 HSM. No controller
-          in v0.7.0.
+        description: |-
+          AzureRootKey is an L1 root-key binding to an Azure Key Vault key,
+          federated via Azure AD workload identity.
         properties:
           apiVersion:
             description: |-
@@ -48,24 +55,55 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of HSMRootKey
+            description: spec defines the desired state of AzureRootKey
             properties:
-              slotUri:
-                description: SlotURI is the PKCS#11 URI identifying the HSM slot +
-                  token + key.
+              federatedIdentity:
+                description: FederatedIdentity is the Azure AD workload-identity federation
+                  config.
+                properties:
+                  clientId:
+                    description: ClientID is the Azure AD application (client) ID.
+                    type: string
+                  tenantId:
+                    description: TenantID is the Azure AD tenant ID.
+                    type: string
+                required:
+                - clientId
+                - tenantId
+                type: object
+              keyName:
+                description: KeyName is the Azure Key Vault key name.
+                type: string
+              keyVersion:
+                description: KeyVersion optionally pins a specific key version; empty
+                  pulls latest.
+                type: string
+              lifecycle:
+                default: Active
+                description: Lifecycle is the user-desired key lifecycle. Defaults
+                  to Active.
+                enum:
+                - Active
+                - Deactivated
                 type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
                 type: string
+              vaultUrl:
+                description: VaultURL is the Azure Key Vault endpoint.
+                type: string
             required:
+            - federatedIdentity
+            - keyName
             - tenantNameRef
+            - vaultUrl
             type: object
           status:
-            description: status defines the observed state of HSMRootKey
+            description: status defines the observed state of AzureRootKey
             properties:
               conditions:
                 description: Conditions represent the latest available observations
-                  of the HSMRootKey's state.
+                  of the AzureRootKey's state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

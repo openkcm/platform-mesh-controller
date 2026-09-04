@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: vaultrootkeys.operations.openkcm.io
+  name: gcprootkeys.operations.openkcm.io
 spec:
   group: operations.openkcm.io
   names:
-    kind: VaultRootKey
-    listKind: VaultRootKeyList
-    plural: vaultrootkeys
-    singular: vaultrootkey
+    kind: GCPRootKey
+    listKind: GCPRootKeyList
+    plural: gcprootkeys
+    singular: gcprootkey
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -28,8 +28,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          VaultRootKey is a stub L1 root-key for HashiCorp Vault Transit.
-          No controller wiring in v0.7.0.
+          GCPRootKey is a stub L1 root-key for GCP KMS. No controller wiring in
+          v0.7.0 — present so DomainKey.spec.primaryRootKeyRef can accept the kind.
         properties:
           apiVersion:
             description: |-
@@ -49,13 +49,20 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of VaultRootKey
+            description: spec defines the desired state of GCPRootKey
             properties:
-              keyName:
-                description: KeyName is the Vault Transit key name.
+              keyUri:
+                description: |-
+                  KeyURI is the GCP KMS resource name
+                  (e.g. projects/.../locations/.../keyRings/.../cryptoKeys/...).
                 type: string
-              serverAddress:
-                description: ServerAddress is the Vault API endpoint.
+              lifecycle:
+                default: Active
+                description: Lifecycle is the user-desired key lifecycle. Defaults
+                  to Active.
+                enum:
+                - Active
+                - Deactivated
                 type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
@@ -64,11 +71,11 @@ spec:
             - tenantNameRef
             type: object
           status:
-            description: status defines the observed state of VaultRootKey
+            description: status defines the observed state of GCPRootKey
             properties:
               conditions:
                 description: Conditions represent the latest available observations
-                  of the VaultRootKey's state.
+                  of the GCPRootKey's state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

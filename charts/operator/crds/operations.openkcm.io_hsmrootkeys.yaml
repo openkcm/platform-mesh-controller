@@ -4,25 +4,19 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: servicekeys.operations.openkcm.io
+  name: hsmrootkeys.operations.openkcm.io
 spec:
   group: operations.openkcm.io
   names:
-    kind: ServiceKey
-    listKind: ServiceKeyList
-    plural: servicekeys
-    singular: servicekey
+    kind: HSMRootKey
+    listKind: HSMRootKeyList
+    plural: hsmrootkeys
+    singular: hsmrootkey
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.tenantNameRef
       name: Tenant
-      type: string
-    - jsonPath: .spec.domainKeyRef
-      name: DomainKey
-      type: string
-    - jsonPath: .status.cryptoState.lifecycleState
-      name: Lifecycle
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -33,7 +27,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ServiceKey defines an encryption key request for a service consumer.
+        description: HSMRootKey is a stub L1 root-key for a PKCS#11 HSM. No controller
+          in v0.7.0.
         properties:
           apiVersion:
             description: |-
@@ -53,25 +48,32 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of ServiceKey
+            description: spec defines the desired state of HSMRootKey
             properties:
-              domainKeyRef:
-                description: DomainKeyRef is the name of the parent DomainKey in the
-                  same workspace.
+              lifecycle:
+                default: Active
+                description: Lifecycle is the user-desired key lifecycle. Defaults
+                  to Active.
+                enum:
+                - Active
+                - Deactivated
+                type: string
+              slotUri:
+                description: SlotURI is the PKCS#11 URI identifying the HSM slot +
+                  token + key.
                 type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
                 type: string
             required:
-            - domainKeyRef
             - tenantNameRef
             type: object
           status:
-            description: status defines the observed state of ServiceKey
+            description: status defines the observed state of HSMRootKey
             properties:
               conditions:
                 description: Conditions represent the latest available observations
-                  of the ServiceKey's state.
+                  of the HSMRootKey's state.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

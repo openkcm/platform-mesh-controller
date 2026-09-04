@@ -70,6 +70,14 @@ spec:
                       upstream KMIP server as object attributes.
                     type: object
                 type: object
+              lifecycle:
+                default: Active
+                description: Lifecycle is the user-desired key lifecycle. Defaults
+                  to Active.
+                enum:
+                - Active
+                - Deactivated
+                type: string
               serviceKeyRef:
                 description: ServiceKeyRef is the name of the parent ServiceKey in
                   the same workspace.
