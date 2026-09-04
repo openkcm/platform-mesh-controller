@@ -1,0 +1,96 @@
+{{- if .Values.rbac.enabled }}
+# RBAC for the controller to access exported resources in the KCP virtual workspace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: syncagent-resources-access
+rules:
+  - apiGroups:
+      - operations.openkcm.io
+    resources:
+      - tenants
+      - domainkeys
+      - servicekeys
+      - awsrootkeys
+      - azurerootkeys
+      - openbaorootkeys
+      - gcprootkeys
+      - vaultrootkeys
+      - hsmrootkeys
+      - dataencryptionkeys
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - operations.openkcm.io
+    resources:
+      - tenants/status
+      - domainkeys/status
+      - servicekeys/status
+      - awsrootkeys/status
+      - azurerootkeys/status
+      - openbaorootkeys/status
+      - dataencryptionkeys/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - operations.openkcm.io
+    resources:
+      - tenants/finalizers
+      - domainkeys/finalizers
+      - servicekeys/finalizers
+      - awsrootkeys/finalizers
+      - azurerootkeys/finalizers
+      - openbaorootkeys/finalizers
+      - dataencryptionkeys/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  - apiGroups:
+      - core.kcp.io
+    resources:
+      - logicalclusters
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apis.kcp.io
+    resources:
+      - apibindings
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: syncagent-resources-access
+subjects:
+  - kind: User
+    name: cluster-admin
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: syncagent-resources-access
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

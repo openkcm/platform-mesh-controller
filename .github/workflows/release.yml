@@ -59,8 +59,8 @@ jobs:
       fail-fast: false
       matrix:
         chart:
-          - openkcm-operator
-          - openkcm-pm-integration
+          - operator
+          - pm-integration
     env:
       VERSION: ${{ needs.publish-image.outputs.version }}
     steps:

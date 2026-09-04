@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Regenerate charts/openkcm-pm-integration/templates/api-resource-schemas.yaml
+Regenerate charts/pm-integration/templates/api-resource-schemas.yaml
 from the controller-gen'd CRDs under config/crd/bases/.
 
 Each APIResourceSchema is named with a chart-version-derived prefix
@@ -19,7 +19,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CRD_DIR = REPO_ROOT / "config" / "crd" / "bases"
-OUT_FILE = REPO_ROOT / "charts" / "openkcm-pm-integration" / "templates" / "api-resource-schemas.yaml"
+OUT_FILE = REPO_ROOT / "charts" / "pm-integration" / "templates" / "api-resource-schemas.yaml"
 
 # Order matters so the generated file is reviewable as a diff over time.
 KIND_ORDER = [
