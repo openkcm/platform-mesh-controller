@@ -1,0 +1,17 @@
+---
+apiVersion: operations.openkcm.io/v1alpha1
+kind: OpenBaoRootKey
+metadata:
+  name: ig-clean-account-root
+spec:
+  tenantNameRef: ig-clean-account
+    
+  # OpenBao (Linux Foundation fork of Vault) Transit Engine bindings
+  enginePath: "transit"
+  keyName: "krypton-l1-root"
+  serverAddress: "https://openbao.internal.acme.corp:8200"
+
+  # Pure mTLS (X.509) native authentication mapped to OpenBao cert auth backend
+  certAuth:
+    authMountPath: "cert"
+    roleName: "krypton-tenant-role"

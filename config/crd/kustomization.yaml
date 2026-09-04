@@ -1,0 +1,25 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it depends on service name and namespace that are out of this kustomize package.
+# It should be run by config/default
+resources:
+- bases/operations.openkcm.io_awsrootkeys.yaml
+- bases/operations.openkcm.io_azurerootkeys.yaml
+- bases/operations.openkcm.io_dataencryptionkeys.yaml
+- bases/operations.openkcm.io_domainkeys.yaml
+- bases/operations.openkcm.io_gcprootkeys.yaml
+- bases/operations.openkcm.io_hsmrootkeys.yaml
+- bases/operations.openkcm.io_openbaorootkeys.yaml
+- bases/operations.openkcm.io_servicekeys.yaml
+- bases/operations.openkcm.io_tenants.yaml
+- bases/operations.openkcm.io_vaultrootkeys.yaml
+# +kubebuilder:scaffold:crdkustomizeresource
+
+patches:
+# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
+# patches here are for enabling the conversion webhook for each CRD
+# +kubebuilder:scaffold:crdkustomizewebhookpatch
+
+# [WEBHOOK] To enable webhook, uncomment the following section
+# the following config is for teaching kustomize how to do kustomization for CRDs.
+#configurations:
+#- kustomizeconfig.yaml

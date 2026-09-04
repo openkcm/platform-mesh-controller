@@ -1,0 +1,14 @@
+rbac:
+  enabled: false
+PUBLIC_HOST: "localhost"
+PUBLIC_SCHEME: "http"
+metadata:
+  enabled: true
+  # Backward-compatible account-level content path. Namespace-level content is
+  # split to avoid leaking namespace navigation into the account sidebar.
+  contentPath: "/pm-content.json"
+  namespaceContentPath: "/pm-content-namespace.json"
+branding:
+  marketplace:
+    title: "OpenKCM"
+    description: "Kubernetes cluster lifecycle and sovereign key management powered by OpenKCM."

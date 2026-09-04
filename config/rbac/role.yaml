@@ -1,0 +1,73 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apis.kcp.io
+  resources:
+  - apibindings
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - core.kcp.io
+  resources:
+  - logicalclusters
+  verbs:
+  - get
+- apiGroups:
+  - operations.openkcm.io
+  resources:
+  - awsrootkeys
+  - azurerootkeys
+  - dataencryptionkeys
+  - domainkeys
+  - openbaorootkeys
+  - servicekeys
+  - tenants
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operations.openkcm.io
+  resources:
+  - awsrootkeys/finalizers
+  - azurerootkeys/finalizers
+  - dataencryptionkeys/finalizers
+  - domainkeys/finalizers
+  - openbaorootkeys/finalizers
+  - servicekeys/finalizers
+  - tenants/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - operations.openkcm.io
+  resources:
+  - awsrootkeys/status
+  - azurerootkeys/status
+  - dataencryptionkeys/status
+  - domainkeys/status
+  - openbaorootkeys/status
+  - servicekeys/status
+  - tenants/status
+  verbs:
+  - get
+  - patch
+  - update

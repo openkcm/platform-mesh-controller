@@ -1,0 +1,10 @@
+## Append samples of your project ##
+resources:
+- operations_v1alpha1_awsrootkey_spec.yaml
+- operations_v1alpha1_azurerootkey_spec.yaml
+- operations_v1alpha1_dataencryptionkey_spec.yaml
+- operations_v1alpha1_domainkey_spec.yaml
+- operations_v1alpha1_openbaorootkey_spec.yaml
+- operations_v1alpha1_servicekey_spec.yaml
+- operations_v1alpha1_tenant_spec.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,0 +1,14 @@
+apiVersion: operations.openkcm.io/v1alpha1
+kind: AzureRootKey
+metadata:
+  name: azure-prod-l1-root
+spec:
+  tenantNameRef: ig-clean-account
+  
+  vaultUrl: "https://my-enterprise-vault.vault.azure.net/"
+  keyName: "openkcm-l1-root"
+
+  # Secure X.509 M2M Federation natively
+  federatedIdentity:
+    tenantId: "89ab-cdef-0123-4567-89abcdef0123"
+    clientId: "1234-5678-90ab-cdef-1234567890ab"

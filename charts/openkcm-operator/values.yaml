@@ -1,0 +1,32 @@
+image:
+  repository: ghcr.io/openkcm/openkcm-controller
+  tag: 0.10.9 # x-release-please-version
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicas: 1
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+kcpKubeconfig:
+  secretName: pm-kubeconfig
+
+tenantNamespace: default
+
+operations:
+  apiExportEndpointSliceName: operations.openkcm.io
+
+mockAPI:
+  # Bind to localhost so only the in-pod controller can reach it.
+  addr: "127.0.0.1:9443"
+
+openkcmAPI:
+  # Default: in-pod mock API server (same process as the controller).
+  # Override with a real OpenKCM/Krypton endpoint when available.
+  url: "http://127.0.0.1:9443"
