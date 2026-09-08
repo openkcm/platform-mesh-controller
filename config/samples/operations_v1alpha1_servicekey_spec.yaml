@@ -1,0 +1,9 @@
+apiVersion: operations.openkcm.io/v1alpha1
+kind: ServiceKey
+metadata:
+  name: mongodb-primary
+  namespace: default
+spec:
+  tenantNameRef: ig-clean-account
+
+  domainKeyRef: ig-clean-account

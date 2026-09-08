@@ -1,0 +1,24 @@
+apiVersion: operations.openkcm.io/v1alpha1
+kind: DomainKey
+metadata:
+  name: ig-clean-account
+spec:
+  type: Team
+
+  tenantNameRef: ig-clean-account
+    
+  # ---------------------------------------------------------
+  # L2 -> L1 Hierarchical Cipher Linkage
+  # ---------------------------------------------------------
+  # Explicit polymorphic reference pointing upwards to the OpenKCM CMK Provider
+  # mandatory for L2 DomainKeys to establish the hierarchical relationship and enable native safe key material generation
+  primaryRootKeyRef:
+    apiGroup: operations.openkcm.io
+    kind: OpenBaoRootKey  # Accepts: AWSRootKey, AzureRootKey, OpenBaoRootKey, GCPRootKey, VaultRootKey, HSMRootKey
+    name: ig-clean-account-root
+
+  # optional fallback reference for multi-root key scenarios (e.g. multi-cloud, multi-region, multi-availability zone)
+  fallbackRootKeyRefs:
+    - apiGroup: operations.openkcm.io
+      kind: AWSRootKey  # Accepts: AWSRootKey, AzureRootKey, OpenBaoRootKey, GCPRootKey, VaultRootKey, HSMRootKey
+      name: aws-finance-l1-root

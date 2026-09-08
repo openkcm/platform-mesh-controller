@@ -1,0 +1,6 @@
+apiVersion: v2
+name: operator
+description: Helm chart for OpenKCM operator with mock API server
+type: application
+version: 0.10.9
+appVersion: 0.10.9

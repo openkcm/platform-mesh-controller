@@ -1,0 +1,9 @@
+apiVersion: v2
+name: pm-integration
+description: >-
+  Platform Mesh portal metadata
+  (APIExport/APIResourceSchema/ProviderMetadata/ContentConfiguration) to be
+  applied in the KCP control plane.
+type: application
+version: 0.10.9
+appVersion: 0.10.9

@@ -1,0 +1,6 @@
+apiVersion: operations.openkcm.io/v1alpha1
+kind: Tenant
+metadata:
+  name: ig-clean-account
+spec:
+  region: eu-central

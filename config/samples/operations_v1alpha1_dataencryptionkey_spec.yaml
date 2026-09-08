@@ -1,0 +1,13 @@
+apiVersion: operations.openkcm.io/v1alpha1
+kind: DataEncryptionKey
+metadata:
+  name: mongodb-primary-dek
+  namespace: default
+spec:
+  tenantNameRef: ig-clean-account
+
+  serviceKeyRef: mongodb-primary
+
+  kmip:
+    attributes:
+      workload: mongodb-primary

@@ -1,0 +1,15 @@
+apiVersion: operations.openkcm.io/v1alpha1
+kind: AWSRootKey
+metadata:
+  name: aws-finance-l1-root
+spec:
+  tenantNameRef: ig-clean-account
+  
+  region: "us-east-1"
+  keyUri: "arn:aws:kms:us-east-1:123456789012:key/mrk-8eb8379z0abcd"
+
+  # Secure X.509 M2M Federation natively
+  rolesAnywhere:
+    trustAnchorArn: "arn:aws:rolesanywhere:us-east-1:123456789012:trust-anchor/ta-1111222233334444"
+    profileArn: "arn:aws:rolesanywhere:us-east-1:123456789012:profile/prof-2222333344445555"
+    roleArn: "arn:aws:iam::123456789012:role/Krypton-Tenant-Role"
