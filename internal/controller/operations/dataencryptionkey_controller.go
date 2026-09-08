@@ -41,7 +41,7 @@ const dataEncryptionKeyFinalizer = "operations.openkcm.io/dataencryptionkey-clea
 // DataEncryptionKeyReconciler reconciles a DataEncryptionKey (L4). Requires
 // the parent ServiceKey to be at lifecycleState=Active before provisioning.
 type DataEncryptionKeyReconciler struct {
-	APIClient *openkcmapi.Client
+	APIClient Backend
 	Manager   mcmanager.Manager
 }
 

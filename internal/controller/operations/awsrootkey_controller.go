@@ -40,7 +40,7 @@ const awsRootKeyFinalizer = "operations.openkcm.io/awsrootkey-cleanup"
 // Real AWS KMS / Roles Anywhere wiring is a follow-up; v0.7.0 stands in
 // the mock API for upstream calls per #216 acceptance criteria.
 type AWSRootKeyReconciler struct {
-	APIClient        *openkcmapi.Client
+	APIClient        Backend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
