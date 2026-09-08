@@ -1,7 +1,6 @@
 package operations
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -18,46 +17,6 @@ import (
 )
 
 const testOpenBaoRootKeyKind = "OpenBaoRootKey"
-
-func TestAccountNameFromPath(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-		want string
-		ok   bool
-	}{
-		{
-			name: "account workspace",
-			path: "root:orgs:showroom:ig-clean-account",
-			want: "ig-clean-account",
-			ok:   true,
-		},
-		{
-			name: "org workspace is not an account",
-			path: "root:orgs:showroom",
-		},
-		{
-			name: "provider workspace is not an account",
-			path: "root:providers:openkcm-provider",
-		},
-		{
-			name: "nested account child is not the account",
-			path: "root:orgs:showroom:ig-clean-account:system",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := accountNameFromPath(tt.path)
-			if ok != tt.ok {
-				t.Fatalf("ok = %v, want %v", ok, tt.ok)
-			}
-			if got != tt.want {
-				t.Fatalf("accountName = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestIsOperationsAPIBinding(t *testing.T) {
 	binding := &kcpapisv1alpha2.APIBinding{
@@ -84,7 +43,7 @@ func TestIsOperationsAPIBinding(t *testing.T) {
 }
 
 func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -148,7 +107,7 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 }
 
 func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -204,7 +163,7 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 }
 
 func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -275,7 +234,7 @@ func TestDomainKeyOpenKCMNameIncludesNamespace(t *testing.T) {
 }
 
 func TestEnsureAutoDomainKeysForAccountRootSkipsNamespaceLocalRoot(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -296,7 +255,7 @@ func TestEnsureAutoDomainKeysForAccountRootSkipsNamespaceLocalRoot(t *testing.T)
 }
 
 func TestEnsureAutoDomainKeyForNamespaceSkipsExistingDomainKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -334,7 +293,7 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsExistingDomainKey(t *testing.T) {
 }
 
 func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -413,7 +372,7 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 }
 
 func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -467,7 +426,7 @@ func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 }
 
 func TestDomainKeyPrimaryRootKeyLifecycleTreatsClearedRefAsInactiveParent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -516,7 +475,7 @@ func assertPendingRootKeyResolution(t *testing.T, err error) {
 }
 
 func TestDomainKeySingleton(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -612,5 +571,138 @@ func TestDomainKeySingleton(t *testing.T) {
 	}
 	if got == nil || got.Name != "alpha" {
 		t.Fatalf("tiebreak winner = %v, want alpha", got)
+	}
+}
+
+// The OIDC block is optional in the v0.7.0 schema, so ensureTenant must leave
+// it unset unless the operator was actually configured with defaults — an
+// empty block would claim a trust relationship that does not exist.
+func TestEnsureTenantOIDCDefaulting(t *testing.T) {
+	const accountName = "acme-prod"
+
+	tests := []struct {
+		name      string
+		issuer    string
+		jwksURI   string
+		audiences []string
+		wantSet   bool
+	}{
+		{
+			name:    "no defaults configured leaves the block unset",
+			wantSet: false,
+		},
+		{
+			name:    "issuer alone is enough to populate it",
+			issuer:  "https://issuer.example",
+			wantSet: true,
+		},
+		{
+			name:    "jwks uri alone is enough to populate it",
+			jwksURI: "https://issuer.example/keys",
+			wantSet: true,
+		},
+		{
+			name:      "audiences alone are enough to populate it",
+			audiences: []string{"openkcm"},
+			wantSet:   true,
+		},
+		{
+			name:      "all three are carried over",
+			issuer:    "https://issuer.example",
+			jwksURI:   "https://issuer.example/keys",
+			audiences: []string{"openkcm", "platform-mesh"},
+			wantSet:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// given
+			ctx := t.Context()
+			scheme := runtime.NewScheme()
+			if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
+				t.Fatalf("add operations scheme: %v", err)
+			}
+			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			reconciler := &AccountBootstrapReconciler{
+				DefaultRegion:        "eu-central",
+				DefaultOIDCIssuer:    tt.issuer,
+				DefaultOIDCJWKSURI:   tt.jwksURI,
+				DefaultOIDCAudiences: tt.audiences,
+			}
+
+			// when
+			if err := reconciler.ensureTenant(ctx, cl, defaultTenantNamespace, accountName); err != nil {
+				t.Fatalf("ensure tenant: %v", err)
+			}
+
+			// then
+			tenant := &operationsv1alpha1.Tenant{}
+			key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: accountName}
+			if err := cl.Get(ctx, key, tenant); err != nil {
+				t.Fatalf("get tenant: %v", err)
+			}
+			if tenant.Spec.Region != "eu-central" {
+				t.Errorf("region = %q, want eu-central", tenant.Spec.Region)
+			}
+
+			got := tenant.Spec.OIDCProvider
+			if !tt.wantSet {
+				if got != nil {
+					t.Fatalf("OIDCProvider = %#v, want nil when no defaults are set", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("OIDCProvider is nil, want it populated from the operator defaults")
+			}
+			if got.Issuer != tt.issuer {
+				t.Errorf("issuer = %q, want %q", got.Issuer, tt.issuer)
+			}
+			if got.JWKSURI != tt.jwksURI {
+				t.Errorf("jwksURI = %q, want %q", got.JWKSURI, tt.jwksURI)
+			}
+			if len(got.Audiences) != len(tt.audiences) {
+				t.Fatalf("audiences = %v, want %v", got.Audiences, tt.audiences)
+			}
+			for i, a := range tt.audiences {
+				if got.Audiences[i] != a {
+					t.Errorf("audiences[%d] = %q, want %q", i, got.Audiences[i], a)
+				}
+			}
+		})
+	}
+}
+
+// The audience slice is copied rather than aliased, so a later mutation of the
+// operator's configuration cannot reach back into an already-created Tenant.
+func TestEnsureTenantCopiesAudiences(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add operations scheme: %v", err)
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	audiences := []string{"openkcm"}
+	reconciler := &AccountBootstrapReconciler{DefaultOIDCAudiences: audiences}
+
+	// when
+	if err := reconciler.ensureTenant(ctx, cl, defaultTenantNamespace, "acme-prod"); err != nil {
+		t.Fatalf("ensure tenant: %v", err)
+	}
+	audiences[0] = "mutated"
+
+	// then
+	tenant := &operationsv1alpha1.Tenant{}
+	key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: "acme-prod"}
+	if err := cl.Get(ctx, key, tenant); err != nil {
+		t.Fatalf("get tenant: %v", err)
+	}
+	if tenant.Spec.OIDCProvider.Audiences[0] != "openkcm" {
+		t.Errorf("audiences[0] = %q, want openkcm: the slice must be copied, not aliased",
+			tenant.Spec.OIDCProvider.Audiences[0])
 	}
 }

@@ -1,7 +1,6 @@
 package mockapi
 
 import (
-	"context"
 	"errors"
 	"net"
 	"testing"
@@ -29,7 +28,7 @@ func startTestServer(t *testing.T) *openkcmapi.Client {
 
 func TestRootKeyLifecycleEndpoints(t *testing.T) {
 	client := startTestServer(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenant, err := client.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: "ig-clean-account"})
 	if err != nil {
@@ -80,7 +79,7 @@ func TestRootKeyLifecycleEndpoints(t *testing.T) {
 
 func TestDEKRequiresActiveServiceKey(t *testing.T) {
 	client := startTestServer(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tenant, err := client.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: "ig-clean-account"})
 	if err != nil {
