@@ -30,3 +30,13 @@ openkcmAPI:
   # Default: in-pod mock API server (same process as the controller).
   # Override with a real OpenKCM/Krypton endpoint when available.
   url: "http://127.0.0.1:9443"
+
+krypton:
+  # host:port of Krypton's admin gRPC API. When empty, Tenant reconciliation
+  # keeps using the mock above; when set, it talks to Krypton instead.
+  #
+  # Leave empty until the transport is settled: the client currently dials in
+  # plaintext, while the showroom gateway expects a bearer token and has no
+  # mTLS configured. Pointing this at the gateway today will fail to
+  # authenticate.
+  grpcAddr: ""

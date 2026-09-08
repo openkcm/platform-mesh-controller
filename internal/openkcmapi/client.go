@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -134,6 +135,11 @@ type GetDEKResponse struct {
 	Version         int32  `json:"version,omitempty"`
 }
 
+// ProcessingStateReady is the value a backend reports once a resource has
+// finished provisioning. It lives with the response types so every
+// implementation and every caller compares against one literal.
+const ProcessingStateReady = "ready"
+
 // APIError is returned when the OpenKCM API responds with a structured
 // error body (code + message). Callers can use errors.As to inspect the
 // machine-readable code or the HTTP status.
@@ -141,12 +147,85 @@ type APIError struct {
 	StatusCode int
 	Code       string
 	Message    string
+
+	// kind is set by the transport that produced the error. Zero value is
+	// KindUnknown, which callers treat as transient.
+	kind Kind
+}
+
+// NewAPIError builds a classified backend error. Transports use it so callers
+// can branch on Kind rather than on a status code.
+func NewAPIError(kind Kind, statusCode int, code, message string) *APIError {
+	return &APIError{StatusCode: statusCode, Code: code, Message: message, kind: kind}
 }
 
 // Error implements the error interface.
 func (e *APIError) Error() string {
 	return fmt.Sprintf("openkcm api error %d %s: %s", e.StatusCode, e.Code, e.Message)
 }
+
+// Kind classifies a backend failure so callers can decide what to do without
+// knowing whether the transport was HTTP or gRPC.
+type Kind int
+
+const (
+	// KindUnknown means the failure could not be classified. Treat as transient.
+	KindUnknown Kind = iota
+	// KindNotFound: the resource is gone. Retrying the same call will not help;
+	// the caller may need to recreate it.
+	KindNotFound
+	// KindConflict: the resource already exists, or the requested transition is
+	// not allowed from the current state.
+	KindConflict
+	// KindNotReady: a precondition is not met yet, typically a parent key that
+	// has not been activated. Retrying later is the correct response.
+	KindNotReady
+	// KindInvalid: the request itself is wrong. Retrying never helps.
+	KindInvalid
+	// KindUnauthorized: credentials are missing or rejected.
+	KindUnauthorized
+	// KindTransient: the backend is unreachable or failed internally.
+	KindTransient
+)
+
+// Kind reports how the failure should be handled.
+func (e *APIError) Kind() Kind { return e.kind }
+
+// Retryable reports whether repeating the call can succeed without the caller
+// changing anything.
+func (e *APIError) Retryable() bool {
+	return e.kind == KindNotReady || e.kind == KindTransient || e.kind == KindUnknown
+}
+
+// classify returns the failure kind for err, or KindUnknown when err is not an
+// APIError at all.
+func classify(err error) Kind {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return KindUnknown
+	}
+	return apiErr.kind
+}
+
+// IsNotFound reports whether err came back as a missing resource.
+func IsNotFound(err error) bool { return classify(err) == KindNotFound }
+
+// IsConflict reports whether err came back as an already-existing resource or a
+// rejected state transition.
+func IsConflict(err error) bool { return classify(err) == KindConflict }
+
+// IsRetryable reports whether repeating the call can succeed unchanged.
+func IsRetryable(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		// An unclassified error is most likely a transport failure.
+		return true
+	}
+	return apiErr.Retryable()
+}
+
+// SupportsTenantDeletion reports true: the mock serves DELETE /tenants/{id}.
+func (c *Client) SupportsTenantDeletion() bool { return true }
 
 // --- Client methods ---
 

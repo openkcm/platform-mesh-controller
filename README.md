@@ -35,8 +35,8 @@ single deployment serves every account workspace.
 | `charts/operator` | the controller deployment, RBAC and CRDs |
 | `charts/pm-integration` | kcp metadata: `APIExport`, `APIResourceSchema`, `ProviderMetadata`, `ContentConfiguration`. No workloads |
 
-The microfrontend served to the Platform Mesh portal lives in
-[platform-mesh-microfrontend](https://github.com/openkcm/platform-mesh-microfrontend).
+The microfrontend served to the Platform Mesh portal stays in the Showroom
+repository and is contributed to there; only the controller moved here.
 `pm-integration` references it by URL only.
 
 ## Requirements and Setup

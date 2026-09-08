@@ -38,6 +38,9 @@ spec:
             - --operations-apiexport-endpointslice={{ .Values.operations.apiExportEndpointSliceName }}
             - --mock-api-addr={{ .Values.mockAPI.addr }}
             - --openkcm-api-url={{ .Values.openkcmAPI.url }}
+            {{- with .Values.krypton.grpcAddr }}
+            - --krypton-grpc-addr={{ . }}
+            {{- end }}
             - --health-probe-bind-address=:8081
             - --metrics-bind-address=:8080
           env:

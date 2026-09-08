@@ -17,6 +17,9 @@ limitations under the License.
 package main
 
 import (
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"context"
 	"flag"
 	"os"
@@ -43,6 +46,7 @@ import (
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	operationscontroller "github.com/openkcm/openkcm-controller/internal/controller/operations"
+	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 	"github.com/openkcm/openkcm-controller/internal/mockapi"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
@@ -66,6 +70,7 @@ func main() {
 	var operationsEndpointSlice string
 	var mockAPIAddr string
 	var openkcmAPIURL string
+	var kryptonAddr string
 	var metricsAddr string
 	var metricsSecure bool
 	var probeAddr string
@@ -87,6 +92,14 @@ func main() {
 	)
 	flag.StringVar(&mockAPIAddr, "mock-api-addr", ":9090", "Mock API server listen address")
 	flag.StringVar(&openkcmAPIURL, "openkcm-api-url", "http://localhost:9090", "OpenKCM API base URL")
+	flag.StringVar(&kryptonAddr,
+		"krypton-grpc-addr",
+		"",
+		"Krypton admin gRPC address (host:port). When set, Tenant reconciliation "+
+			"talks to Krypton instead of the OpenKCM HTTP API. The connection is "+
+			"currently plaintext: transport security for the showroom gateway is "+
+			"unresolved.",
+	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics bind address")
 	flag.BoolVar(&metricsSecure, "metrics-secure", false, "Serve metrics over HTTPS with Kubernetes authn/authz")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe bind address")
@@ -175,6 +188,21 @@ func main() {
 
 	apiClient := openkcmapi.NewClient(openkcmAPIURL)
 
+	// Tenant is the first slice moved onto Krypton's real gRPC API. Every
+	// other reconciler still speaks the mock's HTTP surface, so both clients
+	// coexist until each slice is migrated in turn.
+	var tenantBackend operationscontroller.TenantBackend = apiClient
+	if kryptonAddr != "" {
+		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			setupLog.Error(err, "Failed to connect to Krypton", "addr", kryptonAddr)
+			os.Exit(1)
+		}
+		defer func() { _ = conn.Close() }()
+		tenantBackend = kryptongrpc.NewTenantClient(conn)
+		setupLog.Info("Tenant reconciliation bound to Krypton", "addr", kryptonAddr)
+	}
+
 	kcpCfg, err := clientcmd.BuildConfigFromFlags("", kcpKubeconfig)
 	if err != nil {
 		setupLog.Error(err, "Failed to load KCP kubeconfig")
@@ -233,7 +261,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&operationscontroller.TenantReconciler{APIClient: apiClient}).SetupWithManager(opsMgr); err != nil {
+	if err := (&operationscontroller.TenantReconciler{APIClient: tenantBackend}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)
 	}
