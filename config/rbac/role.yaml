@@ -34,9 +34,12 @@ rules:
   - azurerootkeys
   - dataencryptionkeys
   - domainkeys
+  - gcprootkeys
+  - hsmrootkeys
   - openbaorootkeys
   - servicekeys
   - tenants
+  - vaultrootkeys
   verbs:
   - create
   - delete
@@ -52,9 +55,12 @@ rules:
   - azurerootkeys/finalizers
   - dataencryptionkeys/finalizers
   - domainkeys/finalizers
+  - gcprootkeys/finalizers
+  - hsmrootkeys/finalizers
   - openbaorootkeys/finalizers
   - servicekeys/finalizers
   - tenants/finalizers
+  - vaultrootkeys/finalizers
   verbs:
   - update
 - apiGroups:
@@ -64,9 +70,12 @@ rules:
   - azurerootkeys/status
   - dataencryptionkeys/status
   - domainkeys/status
+  - gcprootkeys/status
+  - hsmrootkeys/status
   - openbaorootkeys/status
   - servicekeys/status
   - tenants/status
+  - vaultrootkeys/status
   verbs:
   - get
   - patch

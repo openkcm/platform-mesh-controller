@@ -279,28 +279,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&operationscontroller.AWSRootKeyReconciler{
-		APIClient:        apiClient,
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "AWSRootKey")
-		os.Exit(1)
-	}
-
-	if err := (&operationscontroller.AzureRootKeyReconciler{
-		APIClient:        apiClient,
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "AzureRootKey")
-		os.Exit(1)
-	}
-
-	if err := (&operationscontroller.OpenBaoRootKeyReconciler{
-		APIClient:        apiClient,
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "OpenBaoRootKey")
-		os.Exit(1)
+	for _, rootKey := range operationscontroller.RootKeyReconcilers(apiClient, tenantNamespace) {
+		if err := rootKey.SetupWithManager(opsMgr); err != nil {
+			setupLog.Error(err, "Failed to create controller", "controller", rootKey.Kind())
+			os.Exit(1)
+		}
 	}
 
 	if err := (&operationscontroller.DataEncryptionKeyReconciler{
