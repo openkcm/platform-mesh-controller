@@ -437,37 +437,18 @@ func activeRootKeyRefs(ctx context.Context, cl client.Client, namespace string) 
 		})
 	}
 
-	awsRoots := &operationsv1alpha1.AWSRootKeyList{}
-	if err := cl.List(ctx, awsRoots, client.InNamespace(namespace)); err != nil {
+	roots, err := listRootKeys(ctx, cl, namespace)
+	if err != nil {
 		return nil, err
 	}
-	for i := range awsRoots.Items {
-		rk := &awsRoots.Items[i]
-		if rk.Status.CryptoState != nil {
-			appendRoot("AWSRootKey", rk.Name, rk.CreationTimestamp, rk.DeletionTimestamp, rk.Status.CryptoState.LifecycleState)
+	for _, root := range roots {
+		state := root.RootKey.GetCryptoState()
+		if state == nil {
+			continue
 		}
-	}
-
-	azureRoots := &operationsv1alpha1.AzureRootKeyList{}
-	if err := cl.List(ctx, azureRoots, client.InNamespace(namespace)); err != nil {
-		return nil, err
-	}
-	for i := range azureRoots.Items {
-		rk := &azureRoots.Items[i]
-		if rk.Status.CryptoState != nil {
-			appendRoot("AzureRootKey", rk.Name, rk.CreationTimestamp, rk.DeletionTimestamp, rk.Status.CryptoState.LifecycleState)
-		}
-	}
-
-	openBaoRoots := &operationsv1alpha1.OpenBaoRootKeyList{}
-	if err := cl.List(ctx, openBaoRoots, client.InNamespace(namespace)); err != nil {
-		return nil, err
-	}
-	for i := range openBaoRoots.Items {
-		rk := &openBaoRoots.Items[i]
-		if rk.Status.CryptoState != nil {
-			appendRoot("OpenBaoRootKey", rk.Name, rk.CreationTimestamp, rk.DeletionTimestamp, rk.Status.CryptoState.LifecycleState)
-		}
+		createdAt := root.RootKey.GetCreationTimestamp()
+		appendRoot(root.Kind, root.RootKey.GetName(),
+			createdAt, root.RootKey.GetDeletionTimestamp(), state.LifecycleState)
 	}
 
 	sort.Slice(refs, func(i, j int) bool {
