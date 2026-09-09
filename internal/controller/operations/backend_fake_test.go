@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/openkcm/openkcm-controller/api/shared"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -37,9 +38,21 @@ type fakeBackend struct {
 	// delete RPC at all.
 	noDelete bool
 
+	createRootKeyCalls []openkcmapi.CreateRootKeyRequest
+	getRootKeyCalls    []string
+	deleteRootKeyCalls []string
+	activateKeyCalls   []string
+	deactivateKeyCalls []string
+
 	createTenantFn func(openkcmapi.CreateTenantRequest) (*openkcmapi.CreateTenantResponse, error)
 	getTenantFn    func(string) (*openkcmapi.GetTenantResponse, error)
 	deleteTenantFn func(string) error
+
+	createRootKeyFn func(openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error)
+	getRootKeyFn    func(string) (*openkcmapi.GetRootKeyResponse, error)
+	activateKeyFn   func(string) (*openkcmapi.ActivateKeyResponse, error)
+	deactivateKeyFn func(string) (*openkcmapi.ActivateKeyResponse, error)
+	deleteRootKeyFn func(string) error
 }
 
 func (f *fakeBackend) CreateTenant(
@@ -86,9 +99,77 @@ func (f *fakeBackend) counts() (create, get, del int) {
 	return len(f.createTenantCalls), len(f.getTenantCalls), len(f.deleteTenantCalls)
 }
 
-// The key operations are unused by the Tenant tests; they exist so fakeBackend
-// satisfies Backend. Extend them when the key reconcilers get the same
-// treatment.
+// rootKeyID is what the fake hands back for a registered root key. Tests match
+// on it, so it must not collide with the tenant id.
+const rootKeyID = "rootkey-uuid"
+
+func (f *fakeBackend) CreateRootKey(
+	_ context.Context, req openkcmapi.CreateRootKeyRequest,
+) (*openkcmapi.CreateRootKeyResponse, error) {
+	f.mu.Lock()
+	f.createRootKeyCalls = append(f.createRootKeyCalls, req)
+	fn := f.createRootKeyFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(req)
+	}
+	return &openkcmapi.CreateRootKeyResponse{ID: rootKeyID, ProcessingState: processingStateReady}, nil
+}
+
+func (f *fakeBackend) GetRootKey(_ context.Context, id string) (*openkcmapi.GetRootKeyResponse, error) {
+	f.mu.Lock()
+	f.getRootKeyCalls = append(f.getRootKeyCalls, id)
+	fn := f.getRootKeyFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	return &openkcmapi.GetRootKeyResponse{ID: id, ProcessingState: processingStateReady}, nil
+}
+
+func (f *fakeBackend) DeleteRootKey(_ context.Context, id string) error {
+	f.mu.Lock()
+	f.deleteRootKeyCalls = append(f.deleteRootKeyCalls, id)
+	fn := f.deleteRootKeyFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	return nil
+}
+
+func (f *fakeBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	f.mu.Lock()
+	f.activateKeyCalls = append(f.activateKeyCalls, id)
+	fn := f.activateKeyFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	return &openkcmapi.ActivateKeyResponse{
+		ID:             id,
+		LifecycleState: string(shared.LifecycleActive),
+		Version:        1,
+	}, nil
+}
+
+func (f *fakeBackend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	f.mu.Lock()
+	f.deactivateKeyCalls = append(f.deactivateKeyCalls, id)
+	fn := f.deactivateKeyFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(id)
+	}
+	return &openkcmapi.ActivateKeyResponse{
+		ID:             id,
+		LifecycleState: string(shared.LifecycleDeactivated),
+		Version:        1,
+	}, nil
+}
+
+// The L2-L4 key operations are unused by these tests; they exist so
+// fakeBackend satisfies Backend.
 
 func (f *fakeBackend) CreateKey(
 	context.Context, openkcmapi.CreateKeyRequest,
@@ -99,21 +180,6 @@ func (f *fakeBackend) GetKey(context.Context, string) (*openkcmapi.GetKeyRespons
 	return &openkcmapi.GetKeyResponse{}, nil
 }
 func (f *fakeBackend) DeleteKey(context.Context, string) error { return nil }
-func (f *fakeBackend) ActivateKey(context.Context, string) (*openkcmapi.ActivateKeyResponse, error) {
-	return &openkcmapi.ActivateKeyResponse{}, nil
-}
-func (f *fakeBackend) DeactivateKey(context.Context, string) (*openkcmapi.ActivateKeyResponse, error) {
-	return &openkcmapi.ActivateKeyResponse{}, nil
-}
-func (f *fakeBackend) CreateRootKey(
-	context.Context, openkcmapi.CreateRootKeyRequest,
-) (*openkcmapi.CreateRootKeyResponse, error) {
-	return &openkcmapi.CreateRootKeyResponse{}, nil
-}
-func (f *fakeBackend) GetRootKey(context.Context, string) (*openkcmapi.GetRootKeyResponse, error) {
-	return &openkcmapi.GetRootKeyResponse{}, nil
-}
-func (f *fakeBackend) DeleteRootKey(context.Context, string) error { return nil }
 func (f *fakeBackend) CreateDEK(
 	context.Context, openkcmapi.CreateDEKRequest,
 ) (*openkcmapi.CreateDEKResponse, error) {
