@@ -40,7 +40,7 @@ const openBaoRootKeyFinalizer = "operations.openkcm.io/openbaorootkey-cleanup"
 // it with OpenKCM and reflecting upstream identity into status. Real
 // OpenBao Transit wiring is a follow-up; v0.7.0 talks only to the mock API.
 type OpenBaoRootKeyReconciler struct {
-	APIClient        *openkcmapi.Client
+	APIClient        Backend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }

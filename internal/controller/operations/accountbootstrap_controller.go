@@ -124,10 +124,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 		return ctrl.Result{}, nil
 	}
 
-	namespace := r.TenantNamespace
-	if namespace == "" {
-		namespace = defaultTenantNamespace
-	}
+	namespace := defaultAccountNamespace(r.TenantNamespace)
 
 	// Best-effort ensure the destination namespace exists. The openkcm
 	// provider-syncagent typically lacks cluster-scope rights to create

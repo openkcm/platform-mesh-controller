@@ -46,7 +46,7 @@ const serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
 // (PreActive|Active|Suspended|Deactivated|Compromised|Destroyed) back into
 // status as OpenKCM transitions it.
 type ServiceKeyReconciler struct {
-	APIClient *openkcmapi.Client
+	APIClient Backend
 	Manager   mcmanager.Manager
 }
 

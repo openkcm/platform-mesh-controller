@@ -25,6 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
+
+	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
 const (
@@ -32,7 +34,7 @@ const (
 	// LogicalCluster to record its workspace path (e.g. "root:orgs:acme:dev").
 	pathAnnotation = "kcp.io/path"
 
-	processingStateReady = "ready"
+	processingStateReady = openkcmapi.ProcessingStateReady
 )
 
 // workspacePath looks up the LogicalCluster in the given workspace and

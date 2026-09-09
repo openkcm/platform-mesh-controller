@@ -53,7 +53,7 @@ const (
 // The reconciler registers the tenant with the OpenKCM API and surfaces the
 // new common status surface (operationId, reconciliationStatus).
 type TenantReconciler struct {
-	APIClient *openkcmapi.Client
+	APIClient TenantBackend
 	Manager   mcmanager.Manager
 }
 
@@ -79,7 +79,21 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req mcreconcile.Reques
 		return r.handleDeletion(ctx, cl, tenant)
 	}
 
-	if controllerutil.AddFinalizer(tenant, tenantFinalizer) {
+	// Only promise cleanup the backend can actually deliver. Krypton has no
+	// delete RPC, so holding a finalizer there would wedge the object in
+	// Terminating forever and block deletion of its namespace behind it.
+	if r.APIClient.SupportsTenantDeletion() {
+		if controllerutil.AddFinalizer(tenant, tenantFinalizer) {
+			if err := cl.Update(ctx, tenant); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+	} else if controllerutil.RemoveFinalizer(tenant, tenantFinalizer) {
+		// The backend lost the capability, most likely a switch from the mock
+		// to Krypton. Release the object rather than stranding it.
+		logger.Info("backend cannot delete tenants; releasing finalizer",
+			"finalizer", tenantFinalizer)
 		if err := cl.Update(ctx, tenant); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -93,8 +107,17 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req mcreconcile.Reques
 
 	readyCond := meta.FindStatusCondition(tenant.Status.Conditions, readyType)
 
+	// A stored tenant ID means the backend already registered this account, so
+	// never call CreateTenant again: Krypton mints a fresh UUID on every call
+	// and has no unique constraint on the name, so a retry silently produces a
+	// second tenant and orphans the first.
+	//
+	// The annotation is written before the status, so it is the earlier and
+	// therefore the authoritative record of "the backend has seen us".
+	alreadyRegistered := tenant.Annotations[tenantIDAnnotation] != ""
+
 	// Step 1: create path.
-	if readyCond == nil || readyCond.Reason != reasonProcess {
+	if !alreadyRegistered && (readyCond == nil || readyCond.Reason != reasonProcess) {
 		accountName, err := resolveAccountName(ctx, cl)
 		if err != nil {
 			r.setFailed(ctx, cl, tenant, "TenantResolutionFailed", err.Error())

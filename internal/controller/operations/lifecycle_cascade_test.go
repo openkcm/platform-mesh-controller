@@ -11,7 +11,6 @@ You may obtain a copy of the License at
 package operations
 
 import (
-	"context"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +23,7 @@ import (
 )
 
 func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)
@@ -120,7 +119,7 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 }
 
 func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("add operations scheme: %v", err)

@@ -39,7 +39,7 @@ const azureRootKeyFinalizer = "operations.openkcm.io/azurerootkey-cleanup"
 // AzureRootKeyReconciler reconciles an AzureRootKey (L1) via the mock API.
 // Real Azure Key Vault / federated identity wiring is a follow-up.
 type AzureRootKeyReconciler struct {
-	APIClient        *openkcmapi.Client
+	APIClient        Backend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
