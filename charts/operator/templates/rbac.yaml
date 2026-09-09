@@ -14,6 +14,9 @@ rules:
       - awsrootkeys
       - azurerootkeys
       - openbaorootkeys
+      - gcprootkeys
+      - vaultrootkeys
+      - hsmrootkeys
       - dataencryptionkeys
     verbs:
       - create
@@ -32,6 +35,9 @@ rules:
       - awsrootkeys/status
       - azurerootkeys/status
       - openbaorootkeys/status
+      - gcprootkeys/status
+      - vaultrootkeys/status
+      - hsmrootkeys/status
       - dataencryptionkeys/status
     verbs:
       - get
@@ -46,6 +52,9 @@ rules:
       - awsrootkeys/finalizers
       - azurerootkeys/finalizers
       - openbaorootkeys/finalizers
+      - gcprootkeys/finalizers
+      - vaultrootkeys/finalizers
+      - hsmrootkeys/finalizers
       - dataencryptionkeys/finalizers
     verbs:
       - update
