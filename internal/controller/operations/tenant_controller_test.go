@@ -19,11 +19,13 @@ package operations
 import (
 	"errors"
 	"fmt"
+	"net/http"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -113,6 +115,10 @@ func reloadTenant(name string) *operationsv1alpha1.Tenant {
 	t := &operationsv1alpha1.Tenant{}
 	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, t)).To(Succeed())
 	return t
+}
+
+func tenantGone(string) (*openkcmapi.GetTenantResponse, error) {
+	return nil, openkcmapi.NewAPIError(openkcmapi.KindNotFound, http.StatusNotFound, "tenant_not_found", "no such tenant")
 }
 
 func requestFor(t *operationsv1alpha1.Tenant) mcreconcile.Request {
@@ -250,12 +256,12 @@ var _ = Describe("TenantReconciler", func() {
 		})
 	})
 
-	Context("when the backend cannot delete tenants", func() {
+	Context("when the backend cannot delete tenants yet", func() {
 		BeforeEach(func() {
 			backend.noDelete = true
 		})
 
-		It("never takes a finalizer it cannot release", func() {
+		It("still takes the finalizer", func() {
 			tenant := newTenant()
 
 			for range 3 {
@@ -263,11 +269,10 @@ var _ = Describe("TenantReconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			Expect(reloadTenant(tenant.Name).Finalizers).NotTo(ContainElement(tenantFinalizer),
-				"a finalizer against a backend with no delete wedges the object in Terminating")
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
 		})
 
-		It("lets the object be deleted straight away", func() {
+		It("releases the object when the backend cannot delete", func() {
 			tenant := newTenant()
 			for range 3 {
 				_, err := reconciler.Reconcile(ctx, requestFor(tenant))
@@ -276,10 +281,15 @@ var _ = Describe("TenantReconciler", func() {
 
 			Expect(k8sClient.Delete(ctx, reloadTenant(tenant.Name))).To(Succeed())
 
-			err := k8sClient.Get(ctx,
+			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(backend.deleteTenantCalls).To(Equal([]string{"tenant-uuid"}))
+
+			err = k8sClient.Get(ctx,
 				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
 				&operationsv1alpha1.Tenant{})
-			Expect(err).To(HaveOccurred(), "nothing should hold the object back")
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 
@@ -335,6 +345,7 @@ var _ = Describe("TenantReconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 
+			backend.getTenantFn = tenantGone
 			Expect(k8sClient.Delete(ctx, reloadTenant(tenant.Name))).To(Succeed())
 
 			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
@@ -345,7 +356,49 @@ var _ = Describe("TenantReconciler", func() {
 			err = k8sClient.Get(ctx,
 				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
 				&operationsv1alpha1.Tenant{})
-			Expect(err).To(HaveOccurred(), "the object should be gone once the finalizer is released")
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("holds the finalizer until the backend stops reporting the tenant", func() {
+			tenant := newTenant()
+			for range 3 {
+				_, err := reconciler.Reconcile(ctx, requestFor(tenant))
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			Expect(k8sClient.Delete(ctx, reloadTenant(tenant.Name))).To(Succeed())
+
+			res, err := reconciler.Reconcile(ctx, requestFor(tenant))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(Equal(pollInterval))
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
+
+			backend.getTenantFn = tenantGone
+			_, err = reconciler.Reconcile(ctx, requestFor(tenant))
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx,
+				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
+				&operationsv1alpha1.Tenant{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("keeps the finalizer when the backend cannot confirm the delete", func() {
+			tenant := newTenant()
+			for range 3 {
+				_, err := reconciler.Reconcile(ctx, requestFor(tenant))
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			backend.getTenantFn = func(string) (*openkcmapi.GetTenantResponse, error) {
+				return nil, openkcmapi.NewAPIError(
+					openkcmapi.KindTransient, http.StatusServiceUnavailable, "unavailable", "try later")
+			}
+			Expect(k8sClient.Delete(ctx, reloadTenant(tenant.Name))).To(Succeed())
+
+			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
+			Expect(err).To(HaveOccurred())
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
 		})
 
 		It("holds the finalizer while the backend refuses the delete", func() {
@@ -363,9 +416,6 @@ var _ = Describe("TenantReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).To(HaveOccurred())
 
-			// This is the behaviour that wedges a Tenant forever once Krypton
-			// has no DeleteTenant at all: the finalizer is only released after
-			// the backend call succeeds. See krypton#145.
 			still := reloadTenant(tenant.Name)
 			Expect(still.Finalizers).To(ContainElement(tenantFinalizer))
 			Expect(still.DeletionTimestamp).NotTo(BeNil())
