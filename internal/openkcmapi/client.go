@@ -224,9 +224,6 @@ func IsRetryable(err error) bool {
 	return apiErr.Retryable()
 }
 
-// SupportsTenantDeletion reports true: the mock serves DELETE /tenants/{id}.
-func (c *Client) SupportsTenantDeletion() bool { return true }
-
 // --- Client methods ---
 
 // CreateTenant creates a new tenant in the OpenKCM API.

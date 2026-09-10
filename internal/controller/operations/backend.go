@@ -55,25 +55,11 @@ type Backend interface {
 // is separate because it is the only part with a counterpart in Krypton today:
 // TenantService offers CreateTenant, GetTenant and ListTenants, and nothing
 // else here maps one to one.
-//
-// DeleteTenant has no Krypton equivalent at all and will not get one this
-// cycle — the team declined it on 2026-09-04. An implementation that cannot
-// delete must say so rather than pretend, and the Tenant finalizer must stay
-// off until it can.
 type TenantBackend interface {
 	CreateTenant(ctx context.Context, req openkcmapi.CreateTenantRequest) (*openkcmapi.CreateTenantResponse, error)
 	GetTenant(ctx context.Context, id string) (*openkcmapi.GetTenantResponse, error)
+	// DeleteTenant fails with errors.ErrUnsupported when the backend cannot delete tenants.
 	DeleteTenant(ctx context.Context, id string) error
-
-	// SupportsTenantDeletion reports whether DeleteTenant can ever succeed.
-	//
-	// A finalizer is a promise that the operator will clean up before the
-	// object goes away. Against Krypton that promise cannot be kept — there is
-	// no delete RPC, and the team declined to add one on 2026-09-04 — so the
-	// reconciler must not take the finalizer out in the first place. Adding it
-	// anyway leaves every Tenant stuck in Terminating and blocks namespace
-	// deletion behind it.
-	SupportsTenantDeletion() bool
 }
 
 var _ Backend = (*openkcmapi.Client)(nil)

@@ -272,7 +272,7 @@ func TestDeleteTenantIsUnsupported(t *testing.T) {
 	err := c.DeleteTenant(t.Context(), "139d6656")
 
 	// then
-	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("delete must report ErrUnsupported so callers stop retrying, got %v", err)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("want errors.ErrUnsupported, got %v", err)
 	}
 }
