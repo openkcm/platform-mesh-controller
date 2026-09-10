@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/multicluster-runtime/providers/single"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	"github.com/openkcm/openkcm-controller/internal/mockapi"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -352,6 +354,28 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(backend.deleteTenantCalls).To(Equal([]string{"tenant-uuid"}))
+
+			err = k8sClient.Get(ctx,
+				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
+				&operationsv1alpha1.Tenant{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("releases the finalizer against the mock API once the tenant is gone", func() {
+			srv := httptest.NewServer(mockapi.NewServer("").Handler)
+			DeferCleanup(srv.Close)
+			reconciler.APIClient = openkcmapi.NewClient(srv.URL)
+
+			tenant := newTenant()
+			for range 2 {
+				_, err := reconciler.Reconcile(ctx, requestFor(tenant))
+				Expect(err).NotTo(HaveOccurred())
+			}
+			Expect(reloadTenant(tenant.Name).Annotations).To(HaveKey(tenantIDAnnotation))
+
+			Expect(k8sClient.Delete(ctx, reloadTenant(tenant.Name))).To(Succeed())
+			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
+			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx,
 				types.NamespacedName{Name: tenant.Name, Namespace: "default"},

@@ -197,6 +197,25 @@ func (e *APIError) Retryable() bool {
 	return e.kind == KindNotReady || e.kind == KindTransient || e.kind == KindUnknown
 }
 
+func kindForStatus(status int) Kind {
+	switch status {
+	case http.StatusNotFound:
+		return KindNotFound
+	case http.StatusConflict:
+		return KindConflict
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return KindInvalid
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return KindUnauthorized
+	case http.StatusTooManyRequests:
+		return KindTransient
+	}
+	if status >= http.StatusInternalServerError {
+		return KindTransient
+	}
+	return KindUnknown
+}
+
 // classify returns the failure kind for err, or KindUnknown when err is not an
 // APIError at all.
 func classify(err error) Kind {
@@ -409,19 +428,16 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any, r
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
+		kind := kindForStatus(resp.StatusCode)
 		// Try to parse the structured error body {code, message}.
 		var apiErr struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		}
 		if jerr := json.Unmarshal(respBody, &apiErr); jerr == nil && apiErr.Code != "" {
-			return &APIError{
-				StatusCode: resp.StatusCode,
-				Code:       apiErr.Code,
-				Message:    apiErr.Message,
-			}
+			return NewAPIError(kind, resp.StatusCode, apiErr.Code, apiErr.Message)
 		}
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+		return NewAPIError(kind, resp.StatusCode, http.StatusText(resp.StatusCode), string(respBody))
 	}
 
 	if result != nil {
