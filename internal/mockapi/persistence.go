@@ -180,16 +180,14 @@ func (p *persister) save(ctx context.Context, state *persistedState) error {
 		}
 		// Create
 		newCM := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      p.name,
-				Namespace: p.namespace,
-				Labels: map[string]string{
-					mockLabelKey:     mockLabelValue,
-					mockPurposeLabel: mockPurposeValue,
-				},
-				Annotations: map[string]string{
-					"openkcm.io/description": "In-memory state of the mock OpenKCM API, persisted so pod restarts do not lose key material references.",
-				},
+			Name:      p.name,
+			Namespace: p.namespace,
+			Labels: map[string]string{
+				mockLabelKey:     mockLabelValue,
+				mockPurposeLabel: mockPurposeValue,
+			},
+			Annotations: map[string]string{
+				"openkcm.io/description": "In-memory state of the mock OpenKCM API, persisted so pod restarts do not lose key material references.",
 			},
 			Data: map[string]string{stateDataKey: string(data)},
 		}

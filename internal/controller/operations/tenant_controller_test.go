@@ -36,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 	"sigs.k8s.io/multicluster-runtime/providers/single"
@@ -50,6 +49,7 @@ const (
 	testClusterName = "test-workspace"
 	testAccountName = "acme-prod"
 	testWorkspace   = "root:orgs:acme:" + testAccountName
+	testTenantID    = "tenant-uuid"
 )
 
 // newTestManager wires a multicluster manager over the envtest API server. The
@@ -106,7 +106,7 @@ func newTenant() *operationsv1alpha1.Tenant {
 	tenantCounter++
 	t := &operationsv1alpha1.Tenant{}
 	t.Name = fmt.Sprintf("tenant-%d", tenantCounter)
-	t.Namespace = "default"
+	t.Namespace = defaultTenantNamespace
 	Expect(k8sClient.Create(ctx, t)).To(Succeed())
 	return t
 }
@@ -115,7 +115,7 @@ func reloadTenant(name string) *operationsv1alpha1.Tenant {
 	GinkgoHelper()
 
 	t := &operationsv1alpha1.Tenant{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, t)).To(Succeed())
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: defaultTenantNamespace}, t)).To(Succeed())
 	return t
 }
 
@@ -126,10 +126,9 @@ func tenantGone(string) (*openkcmapi.GetTenantResponse, error) {
 func requestFor(t *operationsv1alpha1.Tenant) mcreconcile.Request {
 	return mcreconcile.Request{
 		ClusterName: testClusterName,
-		Request: reconcile.Request{NamespacedName: types.NamespacedName{
-			Name:      t.Name,
-			Namespace: t.Namespace,
-		}},
+
+		Name:      t.Name,
+		Namespace: t.Namespace,
 	}
 }
 
@@ -177,7 +176,7 @@ var _ = Describe("TenantReconciler", func() {
 				"the account name must come from the workspace path, not metadata.name")
 
 			reloaded := reloadTenant(tenant.Name)
-			Expect(reloaded.Annotations).To(HaveKeyWithValue(tenantIDAnnotation, "tenant-uuid"))
+			Expect(reloaded.Annotations).To(HaveKeyWithValue(tenantIDAnnotation, testTenantID))
 			cond := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
@@ -234,12 +233,12 @@ var _ = Describe("TenantReconciler", func() {
 			res, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.RequeueAfter).To(BeZero())
-			Expect(backend.getTenantCalls).To(Equal([]string{"tenant-uuid"}))
+			Expect(backend.getTenantCalls).To(Equal([]string{testTenantID}))
 
 			reloaded := reloadTenant(tenant.Name)
 			cond := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(reloaded.Status.OperationID).To(Equal("tenant-uuid"))
+			Expect(reloaded.Status.OperationID).To(Equal(testTenantID))
 			Expect(reloaded.Status.ObservedGeneration).To(Equal(reloaded.Generation))
 		})
 
@@ -286,10 +285,10 @@ var _ = Describe("TenantReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(backend.deleteTenantCalls).To(Equal([]string{"tenant-uuid"}))
+			Expect(backend.deleteTenantCalls).To(Equal([]string{testTenantID}))
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
+				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -353,10 +352,10 @@ var _ = Describe("TenantReconciler", func() {
 			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(backend.deleteTenantCalls).To(Equal([]string{"tenant-uuid"}))
+			Expect(backend.deleteTenantCalls).To(Equal([]string{testTenantID}))
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
+				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -378,7 +377,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
+				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -402,7 +401,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: "default"},
+				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})

@@ -53,7 +53,7 @@ func (f *fakeBackend) CreateTenant(
 	if fn != nil {
 		return fn(req)
 	}
-	return &openkcmapi.CreateTenantResponse{ID: "tenant-uuid", ProcessingState: "processing"}, nil
+	return &openkcmapi.CreateTenantResponse{ID: testTenantID, ProcessingState: "processing"}, nil
 }
 
 func (f *fakeBackend) GetTenant(_ context.Context, id string) (*openkcmapi.GetTenantResponse, error) {

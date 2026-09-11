@@ -24,10 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
@@ -43,7 +40,7 @@ var _ = Describe("DomainKey Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: defaultTenantNamespace,
 		}
 		domainkey := &operationsv1alpha1.DomainKey{}
 
@@ -52,16 +49,14 @@ var _ = Describe("DomainKey Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, domainkey)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &operationsv1alpha1.DomainKey{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
+					Name:      resourceName,
+					Namespace: defaultTenantNamespace,
 					Spec: operationsv1alpha1.DomainKeySpec{
-						Type:          "Team",
+						Type:          domainKeyTypeTeam,
 						TenantNameRef: "test-tenant",
 						PrimaryRootKeyRef: &shared.TypedReference{
-							APIGroup: "operations.openkcm.io",
-							Kind:     "OpenBaoRootKey",
+							APIGroup: operationsAPIExportName,
+							Kind:     testOpenBaoRootKeyKind,
 							Name:     "test-rootkey",
 						},
 					},
@@ -102,8 +97,8 @@ var _ = Describe("DomainKey Controller", func() {
 			// Verify the reconciler can be constructed with the new struct layout
 			_ = controllerReconciler
 			_ = mcreconcile.Request{
-				Request:     reconcile.Request{NamespacedName: typeNamespacedName},
-				ClusterName: "",
+				NamespacedName: typeNamespacedName,
+				ClusterName:    "",
 			}
 		})
 	})
