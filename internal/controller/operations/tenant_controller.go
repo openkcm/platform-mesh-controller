@@ -45,6 +45,12 @@ const (
 	reasonProcess = "Processing"
 	reasonCreated = "TenantCreated"
 	reasonFailed  = "CreateFailed"
+
+	providerSyncedType          = "ProviderSynced"
+	reasonUpstreamAuthenticated = "UpstreamAuthenticated"
+	reasonDeactivated           = "Deactivated"
+	reasonKeyMaterialBound      = "KeyMaterialBound"
+	reasonSyncSuccessful        = "SyncSuccessful"
 )
 
 // TenantReconciler reconciles a Tenant object across KCP account workspaces.
@@ -140,7 +146,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req mcreconcile.Reques
 	tenantID := tenant.Annotations[tenantIDAnnotation]
 	if tenantID == "" {
 		r.setFailed(ctx, cl, tenant, reasonFailed, "missing tenant ID annotation, restarting")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	resp, err := r.APIClient.GetTenant(ctx, tenantID)

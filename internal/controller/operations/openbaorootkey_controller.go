@@ -131,16 +131,16 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
 					Name:      "openbao-kms-ca",
-					Namespace: "openkcm-system",
-					Key:       "ca.crt",
+					Namespace: openkcmSystemNamespace,
+					Key:       caCertKey,
 				},
 			},
 		}
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             "Processing",
-			Message:            "Root key registered, awaiting activation",
+			Reason:             reasonProcess,
+			Message:            rootKeyRegisteredMessage,
 			ObservedGeneration: rk.Generation,
 		})
 		rk.Status.ObservedGeneration = rk.Generation
@@ -174,16 +174,16 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		rk.Status.ReconciliationStatus.Message = "OpenBao root key bound and authenticated."
 
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             "UpstreamAuthenticated",
+			Reason:             reasonUpstreamAuthenticated,
 			Message:            "Successfully bound to OpenBao Transit",
 			ObservedGeneration: rk.Generation,
 		})
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "ProviderSynced",
+			Type:               providerSyncedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             "SyncSuccessful",
+			Reason:             reasonSyncSuccessful,
 			Message:            "Metadata fully replicated.",
 			ObservedGeneration: rk.Generation,
 		})
@@ -203,9 +203,9 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		rk.Status.CryptoState.LastRotatedAt = &now
 		if newState == shared.LifecycleDeactivated {
 			meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionFalse,
-				Reason:             "Deactivated",
+				Reason:             reasonDeactivated,
 				Message:            "OpenBao root key deactivated per spec.lifecycle.",
 				ObservedGeneration: rk.Generation,
 			})
@@ -214,9 +214,9 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 			}
 		} else {
 			meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionTrue,
-				Reason:             "UpstreamAuthenticated",
+				Reason:             reasonUpstreamAuthenticated,
 				Message:            "OpenBao root key re-activated.",
 				ObservedGeneration: rk.Generation,
 			})
@@ -256,7 +256,7 @@ func (r *OpenBaoRootKeyReconciler) setFailed(ctx context.Context, cl client.Clie
 		Errors:             []string{reason + ": " + message},
 	}
 	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,

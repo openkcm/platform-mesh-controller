@@ -16,11 +16,21 @@ import (
 	"github.com/openkcm/openkcm-controller/api/shared"
 )
 
-const testOpenBaoRootKeyKind = "OpenBaoRootKey"
+const (
+	testOpenBaoRootKeyKind = "OpenBaoRootKey"
+	testRegion             = "eu-central"
+	openkcmAudience        = "openkcm"
+	igCleanAccount         = "ig-clean-account"
+	igCleanAccountRoot     = "ig-clean-account-root"
+	accountRoot            = "account-root"
+	accountFallback        = "account-fallback"
+	teamA                  = "team-a"
+	igorTenant             = "igor"
+)
 
 func TestIsOperationsAPIBinding(t *testing.T) {
 	binding := &kcpapisv1alpha2.APIBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "openkcm"},
+		Name: "openkcm",
 		Spec: kcpapisv1alpha2.APIBindingSpec{
 			Reference: kcpapisv1alpha2.BindingReference{
 				Export: &kcpapisv1alpha2.ExportBindingReference{Name: operationsAPIExportName},
@@ -53,8 +63,8 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	reconciler := &AccountBootstrapReconciler{DefaultRegion: "eu-central"}
-	accountName := "ig-clean-account"
+	reconciler := &AccountBootstrapReconciler{DefaultRegion: testRegion}
+	accountName := igCleanAccount
 	if err := reconciler.ensureTenant(ctx, cl, defaultTenantNamespace, accountName); err != nil {
 		t.Fatalf("ensure tenant: %v", err)
 	}
@@ -66,7 +76,7 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 	if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: accountName}, tenant); err != nil {
 		t.Fatalf("get tenant: %v", err)
 	}
-	if tenant.Spec.Region != "eu-central" {
+	if tenant.Spec.Region != testRegion {
 		t.Fatalf("tenant region = %q, want eu-central", tenant.Spec.Region)
 	}
 	if tenant.Annotations[bootstrapAnnotation] != bootstrapAnnotationAuto {
@@ -83,7 +93,7 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 	if domainKey.Spec.TenantNameRef != accountName {
 		t.Fatalf("dk tenantNameRef = %q, want %q", domainKey.Spec.TenantNameRef, accountName)
 	}
-	if domainKey.Spec.Type != "Team" {
+	if domainKey.Spec.Type != domainKeyTypeTeam {
 		t.Fatalf("dk type = %q, want Team", domainKey.Spec.Type)
 	}
 	if domainKey.Spec.PrimaryRootKeyRef != nil {
@@ -116,21 +126,17 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.OpenBaoRootKey{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "account-root",
-					Namespace:         defaultTenantNamespace,
-					CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-				},
+				Name:              accountRoot,
+				Namespace:         defaultTenantNamespace,
+				CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 				Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 				},
 			},
 			&operationsv1alpha1.AWSRootKey{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "account-fallback",
-					Namespace:         defaultTenantNamespace,
-					CreationTimestamp: metav1.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
-				},
+				Name:              accountFallback,
+				Namespace:         defaultTenantNamespace,
+				CreationTimestamp: metav1.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 				Status: operationsv1alpha1.AWSRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 				},
@@ -138,12 +144,12 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 		).
 		Build()
 
-	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, "team-a", "igor"); err != nil {
+	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, teamA, igorTenant); err != nil {
 		t.Fatalf("ensure auto domain key: %v", err)
 	}
 
 	dk := &operationsv1alpha1.DomainKey{}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: "team-a", Name: "team-a"}, dk); err != nil {
+	if err := cl.Get(ctx, types.NamespacedName{Namespace: teamA, Name: teamA}, dk); err != nil {
 		t.Fatalf("get domain key: %v", err)
 	}
 	if dk.Annotations[bootstrapAnnotation] != bootstrapAnnotationAuto {
@@ -154,7 +160,7 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 	}
 	if dk.Spec.PrimaryRootKeyRef.Kind != testOpenBaoRootKeyKind ||
 		dk.Spec.PrimaryRootKeyRef.Namespace != defaultTenantNamespace ||
-		dk.Spec.PrimaryRootKeyRef.Name != "account-root" {
+		dk.Spec.PrimaryRootKeyRef.Name != accountRoot {
 		t.Fatalf("primaryRootKeyRef = %#v, want OpenBaoRootKey/default/account-root", dk.Spec.PrimaryRootKeyRef)
 	}
 	if len(dk.Spec.FallbackRootKeyRefs) != 0 {
@@ -173,23 +179,19 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.OpenBaoRootKey{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "deleting-root",
-					Namespace:         defaultTenantNamespace,
-					CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-					DeletionTimestamp: &deletionTime,
-					Finalizers:        []string{"openkcm.io/test-finalizer"},
-				},
+				Name:              "deleting-root",
+				Namespace:         defaultTenantNamespace,
+				CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				DeletionTimestamp: &deletionTime,
+				Finalizers:        []string{"openkcm.io/test-finalizer"},
 				Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 				},
 			},
 			&operationsv1alpha1.AWSRootKey{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:              "account-fallback",
-					Namespace:         defaultTenantNamespace,
-					CreationTimestamp: metav1.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
-				},
+				Name:              accountFallback,
+				Namespace:         defaultTenantNamespace,
+				CreationTimestamp: metav1.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 				Status: operationsv1alpha1.AWSRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 				},
@@ -197,12 +199,12 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 		).
 		Build()
 
-	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, "team-a", "igor"); err != nil {
+	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, teamA, igorTenant); err != nil {
 		t.Fatalf("ensure auto domain key: %v", err)
 	}
 
 	dk := &operationsv1alpha1.DomainKey{}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: "team-a", Name: "team-a"}, dk); err != nil {
+	if err := cl.Get(ctx, types.NamespacedName{Namespace: teamA, Name: teamA}, dk); err != nil {
 		t.Fatalf("get domain key: %v", err)
 	}
 	if dk.Spec.PrimaryRootKeyRef == nil {
@@ -210,23 +212,23 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 	}
 	if dk.Spec.PrimaryRootKeyRef.Kind != "AWSRootKey" ||
 		dk.Spec.PrimaryRootKeyRef.Namespace != defaultTenantNamespace ||
-		dk.Spec.PrimaryRootKeyRef.Name != "account-fallback" {
+		dk.Spec.PrimaryRootKeyRef.Name != accountFallback {
 		t.Fatalf("primaryRootKeyRef = %#v, want AWSRootKey/default/account-fallback", dk.Spec.PrimaryRootKeyRef)
 	}
 }
 
 func TestAutoDomainKeyNameKeepsAccountNamespaceCompatible(t *testing.T) {
-	if got := autoDomainKeyName(defaultTenantNamespace, defaultTenantNamespace, "igor"); got != "igor" {
+	if got := autoDomainKeyName(defaultTenantNamespace, defaultTenantNamespace, igorTenant); got != igorTenant {
 		t.Fatalf("account namespace auto name = %q, want igor", got)
 	}
-	if got := autoDomainKeyName(defaultTenantNamespace, "team-a", "igor"); got != "team-a" {
+	if got := autoDomainKeyName(defaultTenantNamespace, teamA, igorTenant); got != teamA {
 		t.Fatalf("namespace auto name = %q, want team-a", got)
 	}
 }
 
 func TestDomainKeyOpenKCMNameIncludesNamespace(t *testing.T) {
 	dk := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{Name: "payments", Namespace: "team-a"},
+		Name: "payments", Namespace: teamA,
 	}
 	if got := domainKeyOpenKCMName(dk); got != "team-a.payments" {
 		t.Fatalf("OpenKCM name = %q, want team-a.payments", got)
@@ -241,7 +243,7 @@ func TestEnsureAutoDomainKeysForAccountRootSkipsNamespaceLocalRoot(t *testing.T)
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	if err := ensureAutoDomainKeysForAccountRoot(ctx, cl, "team-a", defaultTenantNamespace); err != nil {
+	if err := ensureAutoDomainKeysForAccountRoot(ctx, cl, teamA, defaultTenantNamespace); err != nil {
 		t.Fatalf("ensure auto domain keys: %v", err)
 	}
 
@@ -264,27 +266,27 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsExistingDomainKey(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.OpenBaoRootKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "account-root", Namespace: defaultTenantNamespace},
+				Name: accountRoot, Namespace: defaultTenantNamespace,
 				Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 				},
 			},
 			&operationsv1alpha1.DomainKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "custom-domain", Namespace: "team-a"},
+				Name: "custom-domain", Namespace: teamA,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          "Team",
-					TenantNameRef: "igor",
+					Type:          domainKeyTypeTeam,
+					TenantNameRef: igorTenant,
 				},
 			},
 		).
 		Build()
 
-	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, "team-a", "igor"); err != nil {
+	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, teamA, igorTenant); err != nil {
 		t.Fatalf("ensure auto domain key: %v", err)
 	}
 
 	dks := &operationsv1alpha1.DomainKeyList{}
-	if err := cl.List(ctx, dks, client.InNamespace("team-a")); err != nil {
+	if err := cl.List(ctx, dks, client.InNamespace(teamA)); err != nil {
 		t.Fatalf("list domain keys: %v", err)
 	}
 	if len(dks.Items) != 1 || dks.Items[0].Name != "custom-domain" {
@@ -301,7 +303,7 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(&operationsv1alpha1.OpenBaoRootKey{
-			ObjectMeta: metav1.ObjectMeta{Name: "ig-clean-account-root", Namespace: defaultTenantNamespace},
+			Name: igCleanAccountRoot, Namespace: defaultTenantNamespace,
 			Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 				CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 			},
@@ -310,12 +312,12 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 
 	reconciler := &DomainKeyReconciler{AccountNamespace: defaultTenantNamespace}
 	domainKey := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{Name: "ig-clean-account", Namespace: defaultTenantNamespace},
+		Name: igCleanAccount, Namespace: defaultTenantNamespace,
 		Spec: operationsv1alpha1.DomainKeySpec{
 			PrimaryRootKeyRef: &shared.TypedReference{
 				APIGroup: operationsv1alpha1.GroupVersion.Group,
 				Kind:     testOpenBaoRootKeyKind,
-				Name:     "ig-clean-account-root",
+				Name:     igCleanAccountRoot,
 			},
 		},
 	}
@@ -323,7 +325,7 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 		t.Fatalf("resolve existing OpenBaoRootKey: %v", err)
 	}
 
-	domainKey.Namespace = "team-a"
+	domainKey.Namespace = teamA
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = defaultTenantNamespace
 	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err != nil {
 		t.Fatalf("resolve cross-namespace OpenBaoRootKey: %v", err)
@@ -332,7 +334,7 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 	domainKey.Namespace = defaultTenantNamespace
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = ""
 	inactive := &operationsv1alpha1.OpenBaoRootKey{
-		ObjectMeta: metav1.ObjectMeta{Name: "inactive-root", Namespace: defaultTenantNamespace},
+		Name: "inactive-root", Namespace: defaultTenantNamespace,
 		Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 			CryptoState: &shared.CryptoState{LifecycleState: shared.LifecyclePreActive},
 		},
@@ -362,7 +364,7 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 	}
 
 	domainKey.Spec.PrimaryRootKeyRef.Kind = testOpenBaoRootKeyKind
-	domainKey.Spec.PrimaryRootKeyRef.Name = "ig-clean-account-root"
+	domainKey.Spec.PrimaryRootKeyRef.Name = igCleanAccountRoot
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = "other-team"
 	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err == nil {
 		t.Fatal("resolve foreign namespace root key: got nil error")
@@ -380,7 +382,7 @@ func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(&operationsv1alpha1.OpenBaoRootKey{
-			ObjectMeta: metav1.ObjectMeta{Name: "account-root", Namespace: defaultTenantNamespace},
+			Name: accountRoot, Namespace: defaultTenantNamespace,
 			Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 				CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 			},
@@ -389,15 +391,15 @@ func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 
 	reconciler := &DomainKeyReconciler{AccountNamespace: defaultTenantNamespace}
 	domainKey := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{Name: "team-a", Namespace: "team-a"},
+		Name: teamA, Namespace: teamA,
 		Spec: operationsv1alpha1.DomainKeySpec{
-			Type:          "Team",
-			TenantNameRef: "igor",
+			Type:          domainKeyTypeTeam,
+			TenantNameRef: igorTenant,
 			PrimaryRootKeyRef: &shared.TypedReference{
 				APIGroup:  operationsv1alpha1.GroupVersion.Group,
 				Kind:      testOpenBaoRootKeyKind,
 				Namespace: "other-team",
-				Name:      "account-root",
+				Name:      accountRoot,
 			},
 			Lifecycle: shared.DesiredLifecycleActive,
 		},
@@ -435,10 +437,10 @@ func TestDomainKeyPrimaryRootKeyLifecycleTreatsClearedRefAsInactiveParent(t *tes
 
 	reconciler := &DomainKeyReconciler{AccountNamespace: defaultTenantNamespace}
 	domainKey := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{Name: "team-a", Namespace: "team-a"},
+		Name: teamA, Namespace: teamA,
 		Spec: operationsv1alpha1.DomainKeySpec{
-			Type:          "Team",
-			TenantNameRef: "igor",
+			Type:          domainKeyTypeTeam,
+			TenantNameRef: igorTenant,
 			Lifecycle:     shared.DesiredLifecycleActive,
 		},
 		Status: operationsv1alpha1.DomainKeyStatus{
@@ -482,18 +484,14 @@ func TestDomainKeySingleton(t *testing.T) {
 	}
 
 	earlier := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "first",
-			Namespace:         defaultTenantNamespace,
-			CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		},
+		Name:              "first",
+		Namespace:         defaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	later := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "second",
-			Namespace:         defaultTenantNamespace,
-			CreationTimestamp: metav1.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
-		},
+		Name:              "second",
+		Namespace:         defaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
 	}
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -526,13 +524,11 @@ func TestDomainKeySingleton(t *testing.T) {
 	// Deleted earlier siblings should not block.
 	deletionTime := metav1.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	deletingEarlier := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "deleting",
-			Namespace:         defaultTenantNamespace,
-			CreationTimestamp: metav1.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC),
-			DeletionTimestamp: &deletionTime,
-			Finalizers:        []string{domainKeyFinalizer},
-		},
+		Name:              "deleting",
+		Namespace:         defaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC),
+		DeletionTimestamp: &deletionTime,
+		Finalizers:        []string{domainKeyFinalizer},
 	}
 	cl2 := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -548,18 +544,14 @@ func TestDomainKeySingleton(t *testing.T) {
 
 	// Same creationTimestamp — deterministic tiebreaker by name.
 	tieA := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "alpha",
-			Namespace:         defaultTenantNamespace,
-			CreationTimestamp: metav1.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
-		},
+		Name:              "alpha",
+		Namespace:         defaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 	}
 	tieB := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              "beta",
-			Namespace:         defaultTenantNamespace,
-			CreationTimestamp: metav1.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
-		},
+		Name:              "beta",
+		Namespace:         defaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 	}
 	cl3 := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -603,14 +595,14 @@ func TestEnsureTenantOIDCDefaulting(t *testing.T) {
 		},
 		{
 			name:      "audiences alone are enough to populate it",
-			audiences: []string{"openkcm"},
+			audiences: []string{openkcmAudience},
 			wantSet:   true,
 		},
 		{
 			name:      "all three are carried over",
 			issuer:    "https://issuer.example",
 			jwksURI:   "https://issuer.example/keys",
-			audiences: []string{"openkcm", "platform-mesh"},
+			audiences: []string{openkcmAudience, "platform-mesh"},
 			wantSet:   true,
 		},
 	}
@@ -626,7 +618,7 @@ func TestEnsureTenantOIDCDefaulting(t *testing.T) {
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 			reconciler := &AccountBootstrapReconciler{
-				DefaultRegion:        "eu-central",
+				DefaultRegion:        testRegion,
 				DefaultOIDCIssuer:    tt.issuer,
 				DefaultOIDCJWKSURI:   tt.jwksURI,
 				DefaultOIDCAudiences: tt.audiences,
@@ -643,7 +635,7 @@ func TestEnsureTenantOIDCDefaulting(t *testing.T) {
 			if err := cl.Get(ctx, key, tenant); err != nil {
 				t.Fatalf("get tenant: %v", err)
 			}
-			if tenant.Spec.Region != "eu-central" {
+			if tenant.Spec.Region != testRegion {
 				t.Errorf("region = %q, want eu-central", tenant.Spec.Region)
 			}
 
@@ -686,7 +678,7 @@ func TestEnsureTenantCopiesAudiences(t *testing.T) {
 	}
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	audiences := []string{"openkcm"}
+	audiences := []string{openkcmAudience}
 	reconciler := &AccountBootstrapReconciler{DefaultOIDCAudiences: audiences}
 
 	// when
@@ -701,7 +693,7 @@ func TestEnsureTenantCopiesAudiences(t *testing.T) {
 	if err := cl.Get(ctx, key, tenant); err != nil {
 		t.Fatalf("get tenant: %v", err)
 	}
-	if tenant.Spec.OIDCProvider.Audiences[0] != "openkcm" {
+	if tenant.Spec.OIDCProvider.Audiences[0] != openkcmAudience {
 		t.Errorf("audiences[0] = %q, want openkcm: the slice must be copied, not aliased",
 			tenant.Spec.OIDCProvider.Audiences[0])
 	}

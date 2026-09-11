@@ -24,10 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/internal/mockapi"
@@ -42,7 +39,7 @@ var _ = Describe("ServiceKey Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: defaultTenantNamespace,
 		}
 		servicekey := &operationsv1alpha1.ServiceKey{}
 
@@ -51,10 +48,8 @@ var _ = Describe("ServiceKey Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, servicekey)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &operationsv1alpha1.ServiceKey{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
+					Name:      resourceName,
+					Namespace: defaultTenantNamespace,
 					Spec: operationsv1alpha1.ServiceKeySpec{
 						TenantNameRef: "test-tenant",
 						DomainKeyRef:  "test-domainkey",
@@ -96,8 +91,8 @@ var _ = Describe("ServiceKey Controller", func() {
 			// Verify the reconciler can be constructed with the new struct layout
 			_ = controllerReconciler
 			_ = mcreconcile.Request{
-				Request:     reconcile.Request{NamespacedName: typeNamespacedName},
-				ClusterName: "",
+				NamespacedName: typeNamespacedName,
+				ClusterName:    "",
 			}
 		})
 	})

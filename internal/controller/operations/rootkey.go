@@ -26,6 +26,12 @@ import (
 	"github.com/openkcm/openkcm-controller/api/shared"
 )
 
+const (
+	openkcmSystemNamespace   = "openkcm-system"
+	caCertKey                = "ca.crt"
+	rootKeyRegisteredMessage = "Root key registered, awaiting activation"
+)
+
 // rootKeyGVKEntry pairs a GroupVersionKind with a factory that returns a
 // concrete typed client.Object for that kind. Used by reconcilers that
 // resolve a polymorphic L1 reference (DomainKey.spec.primaryRootKeyRef).

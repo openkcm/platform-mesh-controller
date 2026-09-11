@@ -24,7 +24,6 @@ import (
 
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
@@ -53,7 +52,7 @@ func newBinding(exportName string, phase kcpapisv1alpha2.APIBindingPhaseType) *k
 func requestForBinding(b *kcpapisv1alpha2.APIBinding) mcreconcile.Request {
 	return mcreconcile.Request{
 		ClusterName: testClusterName,
-		Request:     reconcile.Request{NamespacedName: types.NamespacedName{Name: b.Name}},
+		Name:        b.Name,
 	}
 }
 
@@ -92,7 +91,7 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 		deleteTenantIfPresent()
 		reconciler = &AccountBootstrapReconciler{
 			Manager:       newTestManager(),
-			DefaultRegion: "eu-central",
+			DefaultRegion: testRegion,
 		}
 	})
 
@@ -172,7 +171,7 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 			tenant := &operationsv1alpha1.Tenant{}
 			Expect(k8sClient.Get(ctx, key, tenant)).To(Succeed(),
 				"the Tenant must be named after the account derived from the workspace path")
-			Expect(tenant.Spec.Region).To(Equal("eu-central"))
+			Expect(tenant.Spec.Region).To(Equal(testRegion))
 
 			dk := &operationsv1alpha1.DomainKey{}
 			Expect(k8sClient.Get(ctx, key, dk)).To(Succeed())
