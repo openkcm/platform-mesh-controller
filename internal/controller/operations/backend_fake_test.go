@@ -18,6 +18,7 @@ package operations
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
@@ -33,8 +34,7 @@ type fakeBackend struct {
 	getTenantCalls    []string
 	deleteTenantCalls []string
 
-	// noDelete makes the fake behave like the Krypton client, which has no
-	// delete RPC at all.
+	// noDelete makes DeleteTenant answer like the Krypton client does.
 	noDelete bool
 
 	createTenantFn func(openkcmapi.CreateTenantRequest) (*openkcmapi.CreateTenantResponse, error)
@@ -53,7 +53,7 @@ func (f *fakeBackend) CreateTenant(
 	if fn != nil {
 		return fn(req)
 	}
-	return &openkcmapi.CreateTenantResponse{ID: "tenant-uuid", ProcessingState: "processing"}, nil
+	return &openkcmapi.CreateTenantResponse{ID: testTenantID, ProcessingState: "processing"}, nil
 }
 
 func (f *fakeBackend) GetTenant(_ context.Context, id string) (*openkcmapi.GetTenantResponse, error) {
@@ -71,14 +71,16 @@ func (f *fakeBackend) DeleteTenant(_ context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteTenantCalls = append(f.deleteTenantCalls, id)
 	fn := f.deleteTenantFn
+	noDelete := f.noDelete
 	f.mu.Unlock()
+	if noDelete {
+		return errors.ErrUnsupported
+	}
 	if fn != nil {
 		return fn(id)
 	}
 	return nil
 }
-
-func (f *fakeBackend) SupportsTenantDeletion() bool { return !f.noDelete }
 
 func (f *fakeBackend) counts() (create, get, del int) {
 	f.mu.Lock()

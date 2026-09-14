@@ -18,6 +18,7 @@ package operations
 
 import (
 	"context"
+	"errors"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +45,12 @@ const (
 	reasonProcess = "Processing"
 	reasonCreated = "TenantCreated"
 	reasonFailed  = "CreateFailed"
+
+	providerSyncedType          = "ProviderSynced"
+	reasonUpstreamAuthenticated = "UpstreamAuthenticated"
+	reasonDeactivated           = "Deactivated"
+	reasonKeyMaterialBound      = "KeyMaterialBound"
+	reasonSyncSuccessful        = "SyncSuccessful"
 )
 
 // TenantReconciler reconciles a Tenant object across KCP account workspaces.
@@ -79,21 +86,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req mcreconcile.Reques
 		return r.handleDeletion(ctx, cl, tenant)
 	}
 
-	// Only promise cleanup the backend can actually deliver. Krypton has no
-	// delete RPC, so holding a finalizer there would wedge the object in
-	// Terminating forever and block deletion of its namespace behind it.
-	if r.APIClient.SupportsTenantDeletion() {
-		if controllerutil.AddFinalizer(tenant, tenantFinalizer) {
-			if err := cl.Update(ctx, tenant); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
-		}
-	} else if controllerutil.RemoveFinalizer(tenant, tenantFinalizer) {
-		// The backend lost the capability, most likely a switch from the mock
-		// to Krypton. Release the object rather than stranding it.
-		logger.Info("backend cannot delete tenants; releasing finalizer",
-			"finalizer", tenantFinalizer)
+	if controllerutil.AddFinalizer(tenant, tenantFinalizer) {
 		if err := cl.Update(ctx, tenant); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -153,7 +146,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req mcreconcile.Reques
 	tenantID := tenant.Annotations[tenantIDAnnotation]
 	if tenantID == "" {
 		r.setFailed(ctx, cl, tenant, reasonFailed, "missing tenant ID annotation, restarting")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	resp, err := r.APIClient.GetTenant(ctx, tenantID)
@@ -178,14 +171,38 @@ func (r *TenantReconciler) handleDeletion(ctx context.Context, cl client.Client,
 		return ctrl.Result{}, nil
 	}
 
-	if tenantID := tenant.Annotations[tenantIDAnnotation]; tenantID != "" {
-		if err := r.APIClient.DeleteTenant(ctx, tenantID); err != nil {
-			logger.Error(err, "Failed to delete tenant in OpenKCM; will retry", "tenantID", tenantID)
-			return ctrl.Result{}, err
-		}
-		logger.Info("Tenant deleted from OpenKCM", "tenantID", tenantID)
+	tenantID := tenant.Annotations[tenantIDAnnotation]
+	if tenantID == "" {
+		return r.releaseFinalizer(ctx, cl, tenant)
 	}
 
+	err := r.APIClient.DeleteTenant(ctx, tenantID)
+	if errors.Is(err, errors.ErrUnsupported) {
+		// TODO: Krypton has no DeleteTenant RPC yet, so we skip upstream cleanup and just drop the finalizer.
+		logger.Info("Backend cannot delete tenants; skipping upstream cleanup", "tenantID", tenantID)
+		return r.releaseFinalizer(ctx, cl, tenant)
+	}
+	if err != nil {
+		logger.Error(err, "Failed to delete tenant in OpenKCM; will retry", "tenantID", tenantID)
+		return ctrl.Result{}, err
+	}
+
+	_, err = r.APIClient.GetTenant(ctx, tenantID)
+	if err == nil {
+		logger.Info("Tenant still present in OpenKCM; waiting", "tenantID", tenantID)
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+	if !openkcmapi.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Tenant deleted from OpenKCM", "tenantID", tenantID)
+	return r.releaseFinalizer(ctx, cl, tenant)
+}
+
+func (r *TenantReconciler) releaseFinalizer(
+	ctx context.Context, cl client.Client, tenant *operationsv1alpha1.Tenant,
+) (ctrl.Result, error) {
 	controllerutil.RemoveFinalizer(tenant, tenantFinalizer)
 	if err := cl.Update(ctx, tenant); err != nil {
 		return ctrl.Result{}, err

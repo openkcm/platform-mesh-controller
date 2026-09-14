@@ -42,6 +42,7 @@ import (
 const (
 	domainKeyFinalizer = "operations.openkcm.io/domainkey-cleanup"
 	pollInterval       = 5 * time.Second
+	domainKeyTypeTeam  = "Team"
 )
 
 // DomainKeyReconciler reconciles a DomainKey object across KCP workspaces.
@@ -159,9 +160,9 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 		dk.Status.CryptoState.LastRotatedAt = &now
 		if newState == shared.LifecycleDeactivated {
 			meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionFalse,
-				Reason:             "Deactivated",
+				Reason:             reasonDeactivated,
 				Message:            "DomainKey deactivated per spec.lifecycle.",
 				ObservedGeneration: dk.Generation,
 			})
@@ -170,9 +171,9 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 			}
 		} else {
 			meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionTrue,
-				Reason:             "KeyMaterialBound",
+				Reason:             reasonKeyMaterialBound,
 				Message:            "DomainKey re-activated.",
 				ObservedGeneration: dk.Generation,
 			})
@@ -234,9 +235,9 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 		LastTransitionTime: &now,
 	}
 	meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
-		Reason:             "Processing",
+		Reason:             reasonProcess,
 		Message:            "Key created, waiting for processing to complete",
 		ObservedGeneration: dk.Generation,
 	})
@@ -289,16 +290,16 @@ func (r *DomainKeyReconciler) activatePreActiveDomainKey(ctx context.Context, dk
 		LastTransitionTime: &now,
 	}
 	meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionTrue,
-		Reason:             "KeyMaterialBound",
+		Reason:             reasonKeyMaterialBound,
 		Message:            "DomainKey activated in OpenKCM. ID: " + keyID,
 		ObservedGeneration: dk.Generation,
 	})
 	meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
-		Type:               "ProviderSynced",
+		Type:               providerSyncedType,
 		Status:             metav1.ConditionTrue,
-		Reason:             "SyncSuccessful",
+		Reason:             reasonSyncSuccessful,
 		Message:            "DomainKey synced to OpenKCM",
 		ObservedGeneration: dk.Generation,
 	})
@@ -318,8 +319,7 @@ func (e *rootKeyPendingError) Unwrap() error {
 }
 
 func rootKeyResolutionFailureResult(err error) (ctrl.Result, bool) {
-	var pending *rootKeyPendingError
-	if !errors.As(err, &pending) {
+	if _, ok := errors.AsType[*rootKeyPendingError](err); !ok {
 		return ctrl.Result{}, false
 	}
 	return ctrl.Result{RequeueAfter: pollInterval}, true
@@ -488,7 +488,7 @@ func (r *DomainKeyReconciler) setFailedCondition(ctx context.Context, cl client.
 		Errors:             []string{reason + ": " + message},
 	}
 	meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,

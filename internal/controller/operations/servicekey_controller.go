@@ -154,9 +154,9 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			LastTransitionTime: &now,
 		}
 		meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             "Processing",
+			Reason:             reasonProcess,
 			Message:            "ServiceKey created, waiting for processing to complete",
 			ObservedGeneration: sk.Generation,
 		})
@@ -200,7 +200,7 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			InternalKeyID:      keyID,
 			LastTransitionTime: &now,
 		}
-		r.setReady(sk, "KeyMaterialBound", "ServiceKey is at lifecycle "+string(sk.Status.CryptoState.LifecycleState))
+		r.setReady(sk, reasonKeyMaterialBound, "ServiceKey is at lifecycle "+string(sk.Status.CryptoState.LifecycleState))
 	}
 
 	// Lifecycle reconcile (Active ⇄ Deactivated). Effective desired is
@@ -219,9 +219,9 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		sk.Status.CryptoState.LastRotatedAt = &now
 		if newState == shared.LifecycleDeactivated {
 			meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionFalse,
-				Reason:             "Deactivated",
+				Reason:             reasonDeactivated,
 				Message:            "ServiceKey deactivated per spec.lifecycle.",
 				ObservedGeneration: sk.Generation,
 			})
@@ -229,7 +229,7 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 				return ctrl.Result{}, err
 			}
 		} else {
-			r.setReady(sk, "KeyMaterialBound", "ServiceKey re-activated.")
+			r.setReady(sk, reasonKeyMaterialBound, "ServiceKey re-activated.")
 		}
 	}
 	sk.Status.ObservedGeneration = sk.Generation
@@ -241,16 +241,16 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 
 func (r *ServiceKeyReconciler) setReady(sk *operationsv1alpha1.ServiceKey, reason, message string) {
 	meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,
 		ObservedGeneration: sk.Generation,
 	})
 	meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
-		Type:               "ProviderSynced",
+		Type:               providerSyncedType,
 		Status:             metav1.ConditionTrue,
-		Reason:             "SyncSuccessful",
+		Reason:             reasonSyncSuccessful,
 		Message:            "ServiceKey synced to OpenKCM",
 		ObservedGeneration: sk.Generation,
 	})
@@ -302,7 +302,7 @@ func (r *ServiceKeyReconciler) setFailedCondition(ctx context.Context, cl client
 		Errors:             []string{reason + ": " + message},
 	}
 	meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,

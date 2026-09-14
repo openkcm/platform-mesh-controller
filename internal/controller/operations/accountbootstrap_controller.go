@@ -133,7 +133,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	// Ignore AlreadyExists and Forbidden — if the namespace genuinely
 	// doesn't exist, the subsequent Tenant/DomainKey create will return
 	// a clear error.
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+	ns := &corev1.Namespace{Name: namespace}
 	if err := cl.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) && !apierrors.IsForbidden(err) {
 		return ctrl.Result{}, err
 	}
@@ -164,12 +164,10 @@ func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client
 	}
 
 	tenant := &operationsv1alpha1.Tenant{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      accountName,
-			Namespace: namespace,
-			Annotations: map[string]string{
-				bootstrapAnnotation: bootstrapAnnotationAuto,
-			},
+		Name:      accountName,
+		Namespace: namespace,
+		Annotations: map[string]string{
+			bootstrapAnnotation: bootstrapAnnotationAuto,
 		},
 		Spec: operationsv1alpha1.TenantSpec{
 			Region: r.DefaultRegion,
@@ -207,15 +205,13 @@ func (r *AccountBootstrapReconciler) ensureDomainKey(ctx context.Context, cl cli
 	}
 
 	dk := &operationsv1alpha1.DomainKey{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      accountName,
-			Namespace: namespace,
-			Annotations: map[string]string{
-				bootstrapAnnotation: bootstrapAnnotationAuto,
-			},
+		Name:      accountName,
+		Namespace: namespace,
+		Annotations: map[string]string{
+			bootstrapAnnotation: bootstrapAnnotationAuto,
 		},
 		Spec: operationsv1alpha1.DomainKeySpec{
-			Type:          "Team",
+			Type:          domainKeyTypeTeam,
 			TenantNameRef: accountName,
 			// PrimaryRootKeyRef intentionally left nil — user links it later.
 		},
@@ -355,15 +351,13 @@ func ensureAutoDomainKeyForNamespace(ctx context.Context, cl client.Client, acco
 			return nil
 		}
 		dk := &operationsv1alpha1.DomainKey{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      domainKeyName,
-				Namespace: namespace,
-				Annotations: map[string]string{
-					bootstrapAnnotation: bootstrapAnnotationAuto,
-				},
+			Name:      domainKeyName,
+			Namespace: namespace,
+			Annotations: map[string]string{
+				bootstrapAnnotation: bootstrapAnnotationAuto,
 			},
 			Spec: operationsv1alpha1.DomainKeySpec{
-				Type:              "Team",
+				Type:              domainKeyTypeTeam,
 				TenantNameRef:     accountName,
 				PrimaryRootKeyRef: &primary,
 			},

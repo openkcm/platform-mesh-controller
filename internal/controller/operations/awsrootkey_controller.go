@@ -130,16 +130,16 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
 					Name:      "aws-kms-ca",
-					Namespace: "openkcm-system",
-					Key:       "ca.crt",
+					Namespace: openkcmSystemNamespace,
+					Key:       caCertKey,
 				},
 			},
 		}
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             "Processing",
-			Message:            "Root key registered, awaiting activation",
+			Reason:             reasonProcess,
+			Message:            rootKeyRegisteredMessage,
 			ObservedGeneration: rk.Generation,
 		})
 		rk.Status.ObservedGeneration = rk.Generation
@@ -172,9 +172,9 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
 		rk.Status.ReconciliationStatus.Message = "AWS KMS bound and authenticated."
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             "UpstreamAuthenticated",
+			Reason:             reasonUpstreamAuthenticated,
 			Message:            "Successfully bound to AWS KMS",
 			ObservedGeneration: rk.Generation,
 		})
@@ -194,9 +194,9 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		rk.Status.CryptoState.LastRotatedAt = &now
 		if newState == shared.LifecycleDeactivated {
 			meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionFalse,
-				Reason:             "Deactivated",
+				Reason:             reasonDeactivated,
 				Message:            "AWS root key deactivated per spec.lifecycle.",
 				ObservedGeneration: rk.Generation,
 			})
@@ -205,9 +205,9 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			}
 		} else {
 			meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionTrue,
-				Reason:             "UpstreamAuthenticated",
+				Reason:             reasonUpstreamAuthenticated,
 				Message:            "AWS root key re-activated.",
 				ObservedGeneration: rk.Generation,
 			})
@@ -255,7 +255,7 @@ func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, 
 		Errors:             []string{reason + ": " + message},
 	}
 	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,

@@ -35,11 +35,6 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-// ErrUnsupported is returned for operations Krypton does not offer. Callers
-// must branch on it rather than treat it as a transient failure: retrying will
-// never succeed.
-var ErrUnsupported = errors.New("operation not supported by Krypton")
-
 // TenantClient implements the tenant operations against Krypton's
 // TenantService.
 type TenantClient struct {
@@ -90,16 +85,10 @@ func (c *TenantClient) GetTenant(ctx context.Context, id string) (*openkcmapi.Ge
 	}, nil
 }
 
-// DeleteTenant always fails: TenantService has no delete RPC, and the Krypton
-// team declined to add one this cycle. Enabling the Tenant finalizer against
-// this client would wedge every object in Terminating.
+// DeleteTenant always fails with errors.ErrUnsupported until Krypton has a delete RPC.
 func (c *TenantClient) DeleteTenant(_ context.Context, id string) error {
-	return fmt.Errorf("DeleteTenant %s: %w", id, ErrUnsupported)
+	return fmt.Errorf("DeleteTenant %s: %w", id, errors.ErrUnsupported)
 }
-
-// SupportsTenantDeletion reports false: TenantService has no delete RPC, so
-// callers must not rely on cleanup happening before an object is removed.
-func (c *TenantClient) SupportsTenantDeletion() bool { return false }
 
 // translate maps a gRPC status onto a classified openkcmapi.APIError.
 //

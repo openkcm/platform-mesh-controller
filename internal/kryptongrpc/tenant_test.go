@@ -33,6 +33,11 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
+const (
+	testTenantID   = "139d6656"
+	testTenantName = "acme-prod"
+)
+
 // stubTenantService stands in for Krypton's TenantService over a real gRPC
 // connection, so the wire encoding and the status codes are exercised rather
 // than mocked away.
@@ -86,23 +91,23 @@ func TestCreateTenantReturnsKryptonID(t *testing.T) {
 		createFn: func(req *kryptonadmin.CreateTenantRequest) (*kryptonadmin.CreateTenantResponse, error) {
 			seen = req.GetName()
 			return &kryptonadmin.CreateTenantResponse{
-				Tenant: &kryptonadmin.Tenant{Id: "139d6656", Name: req.GetName()},
+				Tenant: &kryptonadmin.Tenant{Id: testTenantID, Name: req.GetName()},
 			}, nil
 		},
 	})
 
 	// when
-	resp, err := c.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: "acme-prod"})
+	resp, err := c.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: testTenantName})
 
 	// then
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if seen != "acme-prod" {
-		t.Errorf("name sent to krypton = %q, want %q", seen, "acme-prod")
+	if seen != testTenantName {
+		t.Errorf("name sent to krypton = %q, want %q", seen, testTenantName)
 	}
-	if resp.ID != "139d6656" {
-		t.Errorf("ID = %q, want %q", resp.ID, "139d6656")
+	if resp.ID != testTenantID {
+		t.Errorf("ID = %q, want %q", resp.ID, testTenantID)
 	}
 	// Krypton has no provisioning state, so a created tenant is ready at once.
 	if resp.ProcessingState != openkcmapi.ProcessingStateReady {
@@ -177,20 +182,20 @@ func TestGetTenantReturnsID(t *testing.T) {
 	c := newClientAgainst(t, &stubTenantService{
 		getFn: func(req *kryptonadmin.GetTenantRequest) (*kryptonadmin.GetTenantResponse, error) {
 			return &kryptonadmin.GetTenantResponse{
-				Tenant: &kryptonadmin.Tenant{Id: req.GetId(), Name: "acme-prod"},
+				Tenant: &kryptonadmin.Tenant{Id: req.GetId(), Name: testTenantName},
 			}, nil
 		},
 	})
 
 	// when
-	resp, err := c.GetTenant(t.Context(), "139d6656")
+	resp, err := c.GetTenant(t.Context(), testTenantID)
 
 	// then
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.ID != "139d6656" {
-		t.Errorf("ID = %q, want %q", resp.ID, "139d6656")
+	if resp.ID != testTenantID {
+		t.Errorf("ID = %q, want %q", resp.ID, testTenantID)
 	}
 }
 
@@ -269,10 +274,10 @@ func TestDeleteTenantIsUnsupported(t *testing.T) {
 	c := newClientAgainst(t, &stubTenantService{})
 
 	// when
-	err := c.DeleteTenant(t.Context(), "139d6656")
+	err := c.DeleteTenant(t.Context(), testTenantID)
 
 	// then
-	if !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("delete must report ErrUnsupported so callers stop retrying, got %v", err)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("want errors.ErrUnsupported, got %v", err)
 	}
 }
