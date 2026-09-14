@@ -150,9 +150,9 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 			LastTransitionTime: &now,
 		}
 		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             "Processing",
+			Reason:             reasonProcess,
 			Message:            "DEK created, awaiting activation",
 			ObservedGeneration: dek.Generation,
 		})
@@ -185,16 +185,16 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 		dek.Status.ReconciliationStatus.Message = "Data Encryption Key generated natively."
 
 		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             "KeyMaterialBound",
+			Reason:             reasonKeyMaterialBound,
 			Message:            "DataEncryptionKey activated",
 			ObservedGeneration: dek.Generation,
 		})
 		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-			Type:               "ProviderSynced",
+			Type:               providerSyncedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             "SyncSuccessful",
+			Reason:             reasonSyncSuccessful,
 			Message:            "Metadata fully replicated.",
 			ObservedGeneration: dek.Generation,
 		})
@@ -217,17 +217,17 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 		dek.Status.CryptoState.LastRotatedAt = &now
 		if newState == shared.LifecycleDeactivated {
 			meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionFalse,
-				Reason:             "Deactivated",
+				Reason:             reasonDeactivated,
 				Message:            "DEK deactivated per spec.lifecycle.",
 				ObservedGeneration: dek.Generation,
 			})
 		} else {
 			meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionTrue,
-				Reason:             "KeyMaterialBound",
+				Reason:             reasonKeyMaterialBound,
 				Message:            "DEK re-activated.",
 				ObservedGeneration: dek.Generation,
 			})
@@ -267,7 +267,7 @@ func (r *DataEncryptionKeyReconciler) setFailed(ctx context.Context, cl client.C
 		Errors:             []string{reason + ": " + message},
 	}
 	meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,

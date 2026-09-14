@@ -13,13 +13,17 @@ package operations
 import (
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
+)
+
+const (
+	accountRef = "acc"
+	rkPrimary  = "rk-primary"
 )
 
 func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
@@ -34,57 +38,57 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 		WithObjects(
 			// DK referencing the L1 as primary.
 			&operationsv1alpha1.DomainKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "dk-primary", Namespace: "default"},
+				Name: "dk-primary", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          "Team",
-					TenantNameRef: "acc",
+					Type:          domainKeyTypeTeam,
+					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup: "operations.openkcm.io",
-						Kind:     "OpenBaoRootKey", Name: "rk-primary",
+						APIGroup: operationsAPIExportName,
+						Kind:     testOpenBaoRootKeyKind, Name: rkPrimary,
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
 				},
 			},
 			// DK referencing the L1 as a fallback.
 			&operationsv1alpha1.DomainKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "dk-fallback", Namespace: "default"},
+				Name: "dk-fallback", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          "Team",
-					TenantNameRef: "acc",
+					Type:          domainKeyTypeTeam,
+					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup: "operations.openkcm.io",
+						APIGroup: operationsAPIExportName,
 						Kind:     "AzureRootKey", Name: "other-primary",
 					},
 					FallbackRootKeyRefs: []shared.TypedReference{{
-						APIGroup: "operations.openkcm.io",
-						Kind:     "OpenBaoRootKey", Name: "rk-primary",
+						APIGroup: operationsAPIExportName,
+						Kind:     testOpenBaoRootKeyKind, Name: rkPrimary,
 					}},
 					Lifecycle: shared.DesiredLifecycleActive,
 				},
 			},
 			// DK in a namespace referencing the account-level L1.
 			&operationsv1alpha1.DomainKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "dk-namespace", Namespace: "team-a"},
+				Name: "dk-namespace", Namespace: teamA,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          "Team",
-					TenantNameRef: "acc",
+					Type:          domainKeyTypeTeam,
+					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup:  "operations.openkcm.io",
-						Kind:      "OpenBaoRootKey",
-						Namespace: "default",
-						Name:      "rk-primary",
+						APIGroup:  operationsAPIExportName,
+						Kind:      testOpenBaoRootKeyKind,
+						Namespace: defaultTenantNamespace,
+						Name:      rkPrimary,
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
 				},
 			},
 			// DK NOT referencing the L1.
 			&operationsv1alpha1.DomainKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "dk-unrelated", Namespace: "default"},
+				Name: "dk-unrelated", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          "Team",
-					TenantNameRef: "acc",
+					Type:          domainKeyTypeTeam,
+					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup: "operations.openkcm.io",
+						APIGroup: operationsAPIExportName,
 						Kind:     "AWSRootKey", Name: "different",
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
@@ -93,7 +97,7 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 		).
 		Build()
 
-	if err := cascadeDeactivateRootKey(ctx, cl, "OpenBaoRootKey", "default", "rk-primary"); err != nil {
+	if err := cascadeDeactivateRootKey(ctx, cl, testOpenBaoRootKeyKind, defaultTenantNamespace, rkPrimary); err != nil {
 		t.Fatalf("cascadeDeactivateRootKey: %v", err)
 	}
 
@@ -102,10 +106,10 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 		name      string
 		want      shared.DesiredLifecycle
 	}{
-		{"default", "dk-primary", shared.DesiredLifecycleDeactivated},
-		{"default", "dk-fallback", shared.DesiredLifecycleDeactivated},
-		{"team-a", "dk-namespace", shared.DesiredLifecycleDeactivated},
-		{"default", "dk-unrelated", shared.DesiredLifecycleActive},
+		{defaultTenantNamespace, "dk-primary", shared.DesiredLifecycleDeactivated},
+		{defaultTenantNamespace, "dk-fallback", shared.DesiredLifecycleDeactivated},
+		{teamA, "dk-namespace", shared.DesiredLifecycleDeactivated},
+		{defaultTenantNamespace, "dk-unrelated", shared.DesiredLifecycleActive},
 	}
 	for _, c := range cases {
 		dk := &operationsv1alpha1.DomainKey{}
@@ -129,33 +133,33 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.ServiceKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "sk-1", Namespace: "default"},
+				Name: "sk-1", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.ServiceKeySpec{
-					TenantNameRef: "acc",
+					TenantNameRef: accountRef,
 					DomainKeyRef:  "dk-1",
 					Lifecycle:     shared.DesiredLifecycleActive,
 				},
 			},
 			&operationsv1alpha1.ServiceKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "sk-2", Namespace: "default"},
+				Name: "sk-2", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.ServiceKeySpec{
-					TenantNameRef: "acc",
+					TenantNameRef: accountRef,
 					DomainKeyRef:  "different-dk",
 					Lifecycle:     shared.DesiredLifecycleActive,
 				},
 			},
 			&operationsv1alpha1.DataEncryptionKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "dek-1a", Namespace: "default"},
+				Name: "dek-1a", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.DataEncryptionKeySpec{
-					TenantNameRef: "acc",
+					TenantNameRef: accountRef,
 					ServiceKeyRef: "sk-1",
 					Lifecycle:     shared.DesiredLifecycleActive,
 				},
 			},
 			&operationsv1alpha1.DataEncryptionKey{
-				ObjectMeta: metav1.ObjectMeta{Name: "dek-other", Namespace: "default"},
+				Name: "dek-other", Namespace: defaultTenantNamespace,
 				Spec: operationsv1alpha1.DataEncryptionKeySpec{
-					TenantNameRef: "acc",
+					TenantNameRef: accountRef,
 					ServiceKeyRef: "sk-2",
 					Lifecycle:     shared.DesiredLifecycleActive,
 				},
@@ -178,10 +182,10 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 		t.Fatalf("missing parent state + Active spec = %q, want Deactivated (clamp-to-safe)", got)
 	}
 
-	if err := cascadeDeactivateDomainKey(ctx, cl, "default", "dk-1"); err != nil {
+	if err := cascadeDeactivateDomainKey(ctx, cl, defaultTenantNamespace, "dk-1"); err != nil {
 		t.Fatalf("cascadeDeactivateDomainKey: %v", err)
 	}
-	if err := cascadeDeactivateServiceKey(ctx, cl, "default", "sk-1"); err != nil {
+	if err := cascadeDeactivateServiceKey(ctx, cl, defaultTenantNamespace, "sk-1"); err != nil {
 		t.Fatalf("cascadeDeactivateServiceKey: %v", err)
 	}
 
@@ -199,13 +203,13 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 		switch c.obj[:3] {
 		case "sk:":
 			obj := &operationsv1alpha1.ServiceKey{}
-			if err := cl.Get(ctx, types.NamespacedName{Namespace: "default", Name: c.obj[3:]}, obj); err != nil {
+			if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: c.obj[3:]}, obj); err != nil {
 				t.Fatalf("get %s: %v", c.obj, err)
 			}
 			lc = obj.Spec.Lifecycle
 		case "dek":
 			obj := &operationsv1alpha1.DataEncryptionKey{}
-			if err := cl.Get(ctx, types.NamespacedName{Namespace: "default", Name: c.obj[4:]}, obj); err != nil {
+			if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: c.obj[4:]}, obj); err != nil {
 				t.Fatalf("get %s: %v", c.obj, err)
 			}
 			lc = obj.Spec.Lifecycle

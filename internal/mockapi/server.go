@@ -320,7 +320,7 @@ func (s *store) createTenant(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, tenantResponse{
 		ID:              id,
 		Name:            req.Name,
-		ProcessingState: "processing",
+		ProcessingState: processingStateProcessing,
 	})
 }
 
@@ -386,6 +386,8 @@ const (
 	lifecycleCompromised = "Compromised"
 	lifecycleDestroyed   = "Destroyed"
 	processingStateReady = "ready"
+
+	processingStateProcessing = "processing"
 )
 
 func rootKeyKind(provider string) string {
@@ -511,7 +513,7 @@ func (s *store) createKey(w http.ResponseWriter, r *http.Request) {
 		Kind:            req.Kind,
 		Name:            req.Name,
 		ParentID:        req.ParentID,
-		ProcessingState: "processing",
+		ProcessingState: processingStateProcessing,
 		LifecycleState:  lifecyclePreActive,
 	})
 }
@@ -609,7 +611,7 @@ func (s *store) createRootKey(w http.ResponseWriter, r *http.Request) {
 		Kind:            kind,
 		Name:            req.Name,
 		Provider:        req.Provider,
-		ProcessingState: "processing",
+		ProcessingState: processingStateProcessing,
 		LifecycleState:  lifecyclePreActive,
 	})
 }
@@ -724,7 +726,7 @@ func (s *store) createDEK(w http.ResponseWriter, r *http.Request) {
 		Kind:            "L4",
 		Name:            req.Name,
 		ParentID:        req.ServiceKeyID,
-		ProcessingState: "processing",
+		ProcessingState: processingStateProcessing,
 		LifecycleState:  lifecyclePreActive,
 	})
 }
@@ -1072,7 +1074,7 @@ func (s *store) stateForAge(createdAt time.Time) string {
 	if time.Since(createdAt) >= s.provisioningDelay {
 		return processingStateReady
 	}
-	return "processing"
+	return processingStateProcessing
 }
 
 func copyStringMap(in map[string]string) map[string]string {

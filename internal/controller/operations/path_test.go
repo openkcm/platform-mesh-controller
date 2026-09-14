@@ -32,7 +32,7 @@ func TestAccountNameFromPath(t *testing.T) {
 		{
 			name: "account workspace",
 			path: "root:orgs:showroom:ig-clean-account",
-			want: "ig-clean-account",
+			want: igCleanAccount,
 			ok:   true,
 		},
 		{
@@ -94,7 +94,7 @@ func TestDefaultAccountNamespace(t *testing.T) {
 		want  string
 	}{
 		{name: "empty falls back", given: "", want: defaultTenantNamespace},
-		{name: "explicit value is kept", given: "team-a", want: "team-a"},
+		{name: "explicit value is kept", given: teamA, want: teamA},
 	}
 
 	for _, tt := range tests {

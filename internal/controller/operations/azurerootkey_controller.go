@@ -128,16 +128,16 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
 					Name:      "azure-kms-ca",
-					Namespace: "openkcm-system",
-					Key:       "ca.crt",
+					Namespace: openkcmSystemNamespace,
+					Key:       caCertKey,
 				},
 			},
 		}
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             "Processing",
-			Message:            "Root key registered, awaiting activation",
+			Reason:             reasonProcess,
+			Message:            rootKeyRegisteredMessage,
 			ObservedGeneration: rk.Generation,
 		})
 		rk.Status.ObservedGeneration = rk.Generation
@@ -168,9 +168,9 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
 		rk.Status.ReconciliationStatus.Message = "Azure Key Vault bound and authenticated."
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               "Ready",
+			Type:               readyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             "UpstreamAuthenticated",
+			Reason:             reasonUpstreamAuthenticated,
 			Message:            "Successfully bound to Azure Key Vault",
 			ObservedGeneration: rk.Generation,
 		})
@@ -190,9 +190,9 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		rk.Status.CryptoState.LastRotatedAt = &now
 		if newState == shared.LifecycleDeactivated {
 			meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionFalse,
-				Reason:             "Deactivated",
+				Reason:             reasonDeactivated,
 				Message:            "Azure root key deactivated per spec.lifecycle.",
 				ObservedGeneration: rk.Generation,
 			})
@@ -201,9 +201,9 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 			}
 		} else {
 			meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-				Type:               "Ready",
+				Type:               readyType,
 				Status:             metav1.ConditionTrue,
-				Reason:             "UpstreamAuthenticated",
+				Reason:             reasonUpstreamAuthenticated,
 				Message:            "Azure root key re-activated.",
 				ObservedGeneration: rk.Generation,
 			})
@@ -243,7 +243,7 @@ func (r *AzureRootKeyReconciler) setFailed(ctx context.Context, cl client.Client
 		Errors:             []string{reason + ": " + message},
 	}
 	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,
