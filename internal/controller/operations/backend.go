@@ -33,14 +33,7 @@ import (
 // deliberately absent: nothing calls them, and the operations they front are
 // still backlog on the Krypton side (krypton-workspace#77, #79, #81).
 type Backend interface {
-	TenantBackend
-
-	CreateKey(ctx context.Context, req openkcmapi.CreateKeyRequest) (*openkcmapi.CreateKeyResponse, error)
-	GetKey(ctx context.Context, id string) (*openkcmapi.GetKeyResponse, error)
-	DeleteKey(ctx context.Context, id string) error
-
-	ActivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
-	DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
+	DomainKeyBackend
 
 	CreateRootKey(ctx context.Context, req openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error)
 	GetRootKey(ctx context.Context, id string) (*openkcmapi.GetRootKeyResponse, error)
@@ -49,6 +42,27 @@ type Backend interface {
 	CreateDEK(ctx context.Context, req openkcmapi.CreateDEKRequest) (*openkcmapi.CreateDEKResponse, error)
 	GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResponse, error)
 	DeleteDEK(ctx context.Context, id string) error
+}
+
+// DomainKeyBackend is the slice the DomainKey reconciler drives: a tenant plus
+// the key operations Krypton actually offers. It is separate so the DomainKey
+// reconciler can bind to a Krypton-backed client that has no root-key or DEK
+// support yet.
+type DomainKeyBackend interface {
+	TenantBackend
+
+	CreateKey(ctx context.Context, req openkcmapi.CreateKeyRequest) (*openkcmapi.CreateKeyResponse, error)
+	GetKey(ctx context.Context, id string) (*openkcmapi.GetKeyResponse, error)
+	DeleteKey(ctx context.Context, id string) error
+
+	ActivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
+	DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
+}
+
+// keyLifecycler is the minimal surface reconcileLifecycle drives.
+type keyLifecycler interface {
+	ActivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
+	DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
 }
 
 // TenantBackend is the slice of the backend the Tenant reconciler drives. It
@@ -62,4 +76,7 @@ type TenantBackend interface {
 	DeleteTenant(ctx context.Context, id string) error
 }
 
-var _ Backend = (*openkcmapi.Client)(nil)
+var (
+	_ Backend          = (*openkcmapi.Client)(nil)
+	_ DomainKeyBackend = (*openkcmapi.Client)(nil)
+)
