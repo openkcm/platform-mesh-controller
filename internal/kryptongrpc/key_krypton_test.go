@@ -123,11 +123,12 @@ func TestBackendAgainstLiveKrypton(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	b := NewBackend(conn, BackendOptions{})
+	tenants := NewTenantClient(conn)
 	ctx := t.Context()
 	tag := fmt.Sprintf("be-%d", time.Now().UnixNano())
 
 	// given a tenant
-	tenant, err := b.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: tag})
+	tenant, err := tenants.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: tag})
 	if err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}

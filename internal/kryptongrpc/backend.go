@@ -28,38 +28,23 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-// keyIDSeparator joins the tenant and key id into the single opaque handle the
-// reconciler stores. Both parts are UUIDs, so the slash never collides.
+// keyIDSeparator joins the tenant and key id; both are UUIDs, so it never collides.
 const keyIDSeparator = "/"
 
 // Backend adapts Krypton to the key operations the DomainKey reconciler drives.
-//
-// It hides three Krypton specifics the reconciler must not know about:
-//   - keys are addressed by (tenant, id); the reconciler holds only an id, so
-//     the tenant travels inside an opaque id this backend packs and unpacks;
-//   - the reconciler speaks the controller's own key levels ("L2"); the Krypton
-//     kind is looked up in a configured map, never assumed positionally
-//     (Krypton's hierarchy is generic - see the kind-translation ADR);
-//   - a non-root key needs an active parent, and the tenant root is Krypton's
-//     static default until provider root keys are wired, so this backend seeds
-//     it on demand.
 type Backend struct {
-	tenants *TenantClient
-	keys    *KeyClient
+	keys *KeyClient
 
 	kindMap  map[string]string
 	rootKind string
 	rootName string
 }
 
-// BackendOptions configures the Krypton kind translation and the seeded root.
+// BackendOptions translates a controller key level ("L2") to a Krypton kind
+// ("K1") and names the tenant root that parents domain keys.
 type BackendOptions struct {
-	// KindMap translates a controller key level ("L2") to a Krypton kind ("K1").
-	KindMap map[string]string
-	// RootKind is the Krypton kind of the tenant root that parents domain keys.
+	KindMap  map[string]string
 	RootKind string
-	// RootName is the deterministic name of the seeded root, so re-seeding
-	// returns the same key rather than a second one.
 	RootName string
 }
 
@@ -79,26 +64,11 @@ func NewBackend(conn grpc.ClientConnInterface, opts BackendOptions) *Backend {
 		rootName = "openkcm-root"
 	}
 	return &Backend{
-		tenants:  NewTenantClient(conn),
 		keys:     NewKeyClient(conn),
 		kindMap:  kindMap,
 		rootKind: rootKind,
 		rootName: rootName,
 	}
-}
-
-func (b *Backend) CreateTenant(
-	ctx context.Context, req openkcmapi.CreateTenantRequest,
-) (*openkcmapi.CreateTenantResponse, error) {
-	return b.tenants.CreateTenant(ctx, req)
-}
-
-func (b *Backend) GetTenant(ctx context.Context, id string) (*openkcmapi.GetTenantResponse, error) {
-	return b.tenants.GetTenant(ctx, id)
-}
-
-func (b *Backend) DeleteTenant(ctx context.Context, id string) error {
-	return b.tenants.DeleteTenant(ctx, id)
 }
 
 // CreateKey seeds the tenant root, announces the key under it, and returns an
@@ -157,8 +127,7 @@ func (b *Backend) ActivateKey(ctx context.Context, id string) (*openkcmapi.Activ
 	return resp, nil
 }
 
-// DeactivateKey is not offered by Krypton; lifecycle transitions past
-// activation are backlog on their side.
+// DeactivateKey is not offered by Krypton yet.
 func (b *Backend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
 	return nil, fmt.Errorf("DeactivateKey %s: %w", id, errors.ErrUnsupported)
 }
@@ -168,9 +137,8 @@ func (b *Backend) DeleteKey(_ context.Context, id string) error {
 	return fmt.Errorf("DeleteKey %s: %w", id, errors.ErrUnsupported)
 }
 
-// ensureRoot returns the id of the tenant's active root, announcing and
-// activating the static default one when it is not there yet. Announce is
-// idempotent on (tenant, name), so a second call reuses the same root.
+// ensureRoot returns the tenant's active root, announcing and activating the
+// static default one if absent. Announce is idempotent on (tenant, name).
 func (b *Backend) ensureRoot(ctx context.Context, tenantID string) (string, error) {
 	root, err := b.keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenantID,

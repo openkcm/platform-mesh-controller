@@ -34,6 +34,7 @@ import (
 // still backlog on the Krypton side (krypton-workspace#77, #79, #81).
 type Backend interface {
 	DomainKeyBackend
+	TenantBackend
 
 	CreateRootKey(ctx context.Context, req openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error)
 	GetRootKey(ctx context.Context, id string) (*openkcmapi.GetRootKeyResponse, error)
@@ -44,13 +45,11 @@ type Backend interface {
 	DeleteDEK(ctx context.Context, id string) error
 }
 
-// DomainKeyBackend is the slice the DomainKey reconciler drives: a tenant plus
-// the key operations Krypton actually offers. It is separate so the DomainKey
-// reconciler can bind to a Krypton-backed client that has no root-key or DEK
-// support yet.
+// DomainKeyBackend is the slice the DomainKey reconciler drives: the key
+// operations Krypton actually offers. It is separate so the reconciler can bind
+// to a Krypton-backed client that has no root-key or DEK support yet. Tenant
+// identity is read from the Tenant CR, not created here.
 type DomainKeyBackend interface {
-	TenantBackend
-
 	CreateKey(ctx context.Context, req openkcmapi.CreateKeyRequest) (*openkcmapi.CreateKeyResponse, error)
 	GetKey(ctx context.Context, id string) (*openkcmapi.GetKeyResponse, error)
 	DeleteKey(ctx context.Context, id string) error

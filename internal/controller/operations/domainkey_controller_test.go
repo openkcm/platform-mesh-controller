@@ -34,7 +34,8 @@ import (
 )
 
 // domainKeyNamespace isolates these specs: the DomainKey singleton is scoped
-// per namespace, so a dedicated one keeps parallel specs from colliding.
+// per namespace, so a dedicated one keeps parallel specs from colliding. It is
+// also the account namespace here, so the registered Tenant lives in it.
 const domainKeyNamespace = "domainkey-specs"
 
 func ensureDomainKeyNamespace() {
@@ -47,10 +48,29 @@ func ensureDomainKeyNamespace() {
 	}
 }
 
+// ensureRegisteredTenant mimics what the Tenant reconciler leaves behind: the
+// account's Tenant carrying the backend tenant id, which the DomainKey
+// reconciler reads instead of registering the tenant itself.
+func ensureRegisteredTenant() {
+	GinkgoHelper()
+	tenant := &operationsv1alpha1.Tenant{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: testAccountName, Namespace: domainKeyNamespace}, tenant)
+	if apierrors.IsNotFound(err) {
+		tenant = &operationsv1alpha1.Tenant{}
+		tenant.Name = testAccountName
+		tenant.Namespace = domainKeyNamespace
+		tenant.Annotations = map[string]string{tenantIDAnnotation: testTenantID}
+		Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
+		return
+	}
+	Expect(err).NotTo(HaveOccurred())
+	tenant.Annotations = map[string]string{tenantIDAnnotation: testTenantID}
+	Expect(k8sClient.Update(ctx, tenant)).To(Succeed())
+}
+
 var domainKeyRootCounter int
 
-// newActiveRootKey creates an AWSRootKey already registered and active, which
-// is the precondition the DomainKey reconciler gates on.
+// newActiveRootKey creates an AWSRootKey already registered and active.
 func newActiveRootKey() *operationsv1alpha1.AWSRootKey {
 	GinkgoHelper()
 	domainKeyRootCounter++
@@ -75,7 +95,7 @@ func newActiveRootKey() *operationsv1alpha1.AWSRootKey {
 	return rk
 }
 
-func newLinkedDomainKey(rootKeyName string) *operationsv1alpha1.DomainKey {
+func newDomainKey(rootKeyName string) *operationsv1alpha1.DomainKey {
 	GinkgoHelper()
 
 	dk := &operationsv1alpha1.DomainKey{}
@@ -84,12 +104,14 @@ func newLinkedDomainKey(rootKeyName string) *operationsv1alpha1.DomainKey {
 	dk.Spec = operationsv1alpha1.DomainKeySpec{
 		Type:          "Team",
 		TenantNameRef: testAccountName,
-		PrimaryRootKeyRef: &shared.TypedReference{
+	}
+	if rootKeyName != "" {
+		dk.Spec.PrimaryRootKeyRef = &shared.TypedReference{
 			APIGroup:  operationsv1alpha1.GroupVersion.Group,
 			Kind:      testAWSRootKeyKind,
 			Namespace: domainKeyNamespace,
 			Name:      rootKeyName,
-		},
+		}
 	}
 	Expect(k8sClient.Create(ctx, dk)).To(Succeed())
 	return dk
@@ -100,6 +122,29 @@ func reloadDomainKey(name string) *operationsv1alpha1.DomainKey {
 	dk := &operationsv1alpha1.DomainKey{}
 	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: domainKeyNamespace}, dk)).To(Succeed())
 	return dk
+}
+
+func drive(reconciler *DomainKeyReconciler, dk *operationsv1alpha1.DomainKey, passes int) {
+	GinkgoHelper()
+	for range passes {
+		_, err := reconciler.Reconcile(ctx, requestFor(dk))
+		Expect(err).NotTo(HaveOccurred())
+	}
+}
+
+// cleanupDomainKeyObject drops any leftover object so specs stay isolated: the
+// DomainKey singleton and the account Tenant both live under one fixed name.
+func cleanupDomainKeyObject(obj client.Object, name string) {
+	GinkgoHelper()
+	obj.SetName(name)
+	obj.SetNamespace(domainKeyNamespace)
+	got := obj.DeepCopyObject().(client.Object)
+	if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), got); err != nil {
+		return
+	}
+	got.SetFinalizers(nil)
+	Expect(k8sClient.Update(ctx, got)).To(Succeed())
+	Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, got))).To(Succeed())
 }
 
 var _ = Describe("DomainKeyReconciler", func() {
@@ -115,22 +160,19 @@ var _ = Describe("DomainKeyReconciler", func() {
 		reconciler = &DomainKeyReconciler{
 			APIClient:        backend,
 			Manager:          newTestManager(),
-			AccountNamespace: "openkcm-accounts",
+			AccountNamespace: domainKeyNamespace,
 		}
 	})
 
 	AfterEach(func() {
-		dk := &operationsv1alpha1.DomainKey{}
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: "domain-key", Namespace: domainKeyNamespace}, dk); err == nil {
-			dk.Finalizers = nil
-			Expect(k8sClient.Update(ctx, dk)).To(Succeed())
-			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, dk))).To(Succeed())
-		}
+		cleanupDomainKeyObject(&operationsv1alpha1.DomainKey{}, "domain-key")
+		cleanupDomainKeyObject(&operationsv1alpha1.Tenant{}, testAccountName)
 	})
 
 	It("adds the finalizer before touching the backend", func() {
+		ensureRegisteredTenant()
 		root := newActiveRootKey()
-		dk := newLinkedDomainKey(root.Name)
+		dk := newDomainKey(root.Name)
 
 		_, err := reconciler.Reconcile(ctx, requestFor(dk))
 		Expect(err).NotTo(HaveOccurred())
@@ -140,17 +182,15 @@ var _ = Describe("DomainKeyReconciler", func() {
 	})
 
 	It("registers and activates the key once its root is active", func() {
+		ensureRegisteredTenant()
 		root := newActiveRootKey()
-		dk := newLinkedDomainKey(root.Name)
+		dk := newDomainKey(root.Name)
 
-		for range 4 {
-			_, err := reconciler.Reconcile(ctx, requestFor(dk))
-			Expect(err).NotTo(HaveOccurred())
-		}
+		drive(reconciler, dk, 4)
 
 		Expect(backend.createKeyCalls).To(HaveLen(1))
-		Expect(backend.createKeyCalls[0].TenantID).To(Equal("tenant-uuid"),
-			"the key must be created under the path-derived tenant")
+		Expect(backend.createKeyCalls[0].TenantID).To(Equal(testTenantID),
+			"the key must be created under the tenant the Tenant reconciler registered")
 		Expect(backend.createKeyCalls[0].Kind).To(Equal("L2"))
 		Expect(backend.activateKeyCalls).To(ContainElement(fakeKeyID))
 
@@ -158,27 +198,45 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(reloaded.Status.CryptoState).NotTo(BeNil())
 		Expect(reloaded.Status.CryptoState.ID).To(Equal(fakeKeyID))
 		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
-
 		ready := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
 	})
 
-	It("waits for a root key instead of registering a key", func() {
-		root := newActiveRootKey()
-		root.Status.CryptoState = &shared.CryptoState{LifecycleState: shared.LifecyclePreActive}
-		Expect(k8sClient.Status().Update(ctx, root)).To(Succeed())
-		dk := newLinkedDomainKey(root.Name)
+	It("creates the key on the default root when none is linked", func() {
+		ensureRegisteredTenant()
+		dk := newDomainKey("")
 
-		for range 3 {
-			_, err := reconciler.Reconcile(ctx, requestFor(dk))
-			Expect(err).NotTo(HaveOccurred())
-		}
+		drive(reconciler, dk, 4)
+
+		Expect(backend.createKeyCalls).To(HaveLen(1),
+			"an unlinked domain key uses the backend default root, it does not wait")
+		Expect(reloadDomainKey(dk.Name).Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
+	})
+
+	It("waits for the tenant to be registered before creating a key", func() {
+		root := newActiveRootKey()
+		dk := newDomainKey(root.Name)
+
+		drive(reconciler, dk, 3)
 
 		Expect(backend.createKeyCalls).To(BeEmpty(),
-			"a domain key must not be created while its root is not active")
+			"without a registered tenant there is nothing to hang the key on")
 		ready := meta.FindStatusCondition(reloadDomainKey(dk.Name).Status.Conditions, readyType)
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+	})
+
+	It("waits for a non-active root key instead of registering a key", func() {
+		ensureRegisteredTenant()
+		root := newActiveRootKey()
+		root.Status.CryptoState = &shared.CryptoState{LifecycleState: shared.LifecyclePreActive}
+		Expect(k8sClient.Status().Update(ctx, root)).To(Succeed())
+		dk := newDomainKey(root.Name)
+
+		drive(reconciler, dk, 3)
+
+		Expect(backend.createKeyCalls).To(BeEmpty(),
+			"a linked root that is not active yet blocks the domain key")
 	})
 })
