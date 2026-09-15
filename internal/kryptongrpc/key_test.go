@@ -2,13 +2,10 @@ package kryptongrpc
 
 import (
 	"context"
-	"net"
 	"testing"
 
 	kryptonkeys "github.com/openkcm/krypton/pkg/api/v1/proto/admin/keys"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/openkcm/openkcm-controller/api/shared"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
@@ -28,27 +25,9 @@ type stubKeyService struct {
 }
 
 func newKeyClientAgainst(t *testing.T, stub *stubKeyService) *KeyClient {
-	t.Helper()
-
-	lis := bufconn.Listen(1024 * 1024)
-	srv := grpc.NewServer()
-	kryptonkeys.RegisterKeyServiceServer(srv, stub)
-	go func() { _ = srv.Serve(lis) }()
-
-	conn, err := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = conn.Close()
-		srv.Stop()
-	})
-	return NewKeyClient(conn)
+	return NewKeyClient(bufconnDial(t, func(s *grpc.Server) {
+		kryptonkeys.RegisterKeyServiceServer(s, stub)
+	}))
 }
 
 func (s *stubKeyService) AnnounceKey(_ context.Context, req *kryptonkeys.AnnounceKeyRequest) (*kryptonkeys.AnnounceKeyResponse, error) {
