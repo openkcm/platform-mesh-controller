@@ -89,7 +89,7 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
 						APIGroup: operationsAPIExportName,
-						Kind:     "AWSRootKey", Name: "different",
+						Kind:     testAWSRootKeyKind, Name: "different",
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
 				},

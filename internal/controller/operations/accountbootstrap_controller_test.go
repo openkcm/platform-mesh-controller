@@ -18,6 +18,7 @@ import (
 
 const (
 	testOpenBaoRootKeyKind = "OpenBaoRootKey"
+	testAWSRootKeyKind     = "AWSRootKey"
 	testRegion             = "eu-central"
 	openkcmAudience        = "openkcm"
 	igCleanAccount         = "ig-clean-account"
@@ -210,7 +211,7 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 	if dk.Spec.PrimaryRootKeyRef == nil {
 		t.Fatal("dk primaryRootKeyRef is nil")
 	}
-	if dk.Spec.PrimaryRootKeyRef.Kind != "AWSRootKey" ||
+	if dk.Spec.PrimaryRootKeyRef.Kind != testAWSRootKeyKind ||
 		dk.Spec.PrimaryRootKeyRef.Namespace != defaultTenantNamespace ||
 		dk.Spec.PrimaryRootKeyRef.Name != accountFallback {
 		t.Fatalf("primaryRootKeyRef = %#v, want AWSRootKey/default/account-fallback", dk.Spec.PrimaryRootKeyRef)

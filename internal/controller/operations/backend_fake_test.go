@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/openkcm/openkcm-controller/api/shared"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -37,10 +38,17 @@ type fakeBackend struct {
 	// noDelete makes DeleteTenant answer like the Krypton client does.
 	noDelete bool
 
+	createKeyCalls   []openkcmapi.CreateKeyRequest
+	activateKeyCalls []string
+	deleteKeyCalls   []string
+
 	createTenantFn func(openkcmapi.CreateTenantRequest) (*openkcmapi.CreateTenantResponse, error)
 	getTenantFn    func(string) (*openkcmapi.GetTenantResponse, error)
 	deleteTenantFn func(string) error
 }
+
+// fakeKeyID is what the fake hands back for a created key.
+const fakeKeyID = "domain-key-uuid"
 
 func (f *fakeBackend) CreateTenant(
 	_ context.Context,
@@ -93,19 +101,38 @@ func (f *fakeBackend) counts() (create, get, del int) {
 // treatment.
 
 func (f *fakeBackend) CreateKey(
-	context.Context, openkcmapi.CreateKeyRequest,
+	_ context.Context, req openkcmapi.CreateKeyRequest,
 ) (*openkcmapi.CreateKeyResponse, error) {
-	return &openkcmapi.CreateKeyResponse{}, nil
+	f.mu.Lock()
+	f.createKeyCalls = append(f.createKeyCalls, req)
+	f.mu.Unlock()
+	return &openkcmapi.CreateKeyResponse{ID: fakeKeyID, ProcessingState: processingStateReady}, nil
 }
-func (f *fakeBackend) GetKey(context.Context, string) (*openkcmapi.GetKeyResponse, error) {
-	return &openkcmapi.GetKeyResponse{}, nil
+func (f *fakeBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
+	return &openkcmapi.GetKeyResponse{ID: id, ProcessingState: processingStateReady}, nil
 }
-func (f *fakeBackend) DeleteKey(context.Context, string) error { return nil }
-func (f *fakeBackend) ActivateKey(context.Context, string) (*openkcmapi.ActivateKeyResponse, error) {
-	return &openkcmapi.ActivateKeyResponse{}, nil
+func (f *fakeBackend) DeleteKey(_ context.Context, id string) error {
+	f.mu.Lock()
+	f.deleteKeyCalls = append(f.deleteKeyCalls, id)
+	f.mu.Unlock()
+	return nil
 }
-func (f *fakeBackend) DeactivateKey(context.Context, string) (*openkcmapi.ActivateKeyResponse, error) {
-	return &openkcmapi.ActivateKeyResponse{}, nil
+func (f *fakeBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	f.mu.Lock()
+	f.activateKeyCalls = append(f.activateKeyCalls, id)
+	f.mu.Unlock()
+	return &openkcmapi.ActivateKeyResponse{
+		ID:             id,
+		LifecycleState: string(shared.LifecycleActive),
+		Version:        1,
+	}, nil
+}
+func (f *fakeBackend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	return &openkcmapi.ActivateKeyResponse{
+		ID:             id,
+		LifecycleState: string(shared.LifecycleDeactivated),
+		Version:        1,
+	}, nil
 }
 func (f *fakeBackend) CreateRootKey(
 	context.Context, openkcmapi.CreateRootKeyRequest,
