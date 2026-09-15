@@ -417,11 +417,17 @@ func (r *DomainKeyReconciler) handleDeletion(ctx context.Context, cl client.Clie
 	}
 
 	if dk.Status.CryptoState != nil && dk.Status.CryptoState.ID != "" {
-		if err := r.APIClient.DeleteKey(ctx, dk.Status.CryptoState.ID); err != nil {
+		err := r.APIClient.DeleteKey(ctx, dk.Status.CryptoState.ID)
+		switch {
+		case errors.Is(err, errors.ErrUnsupported):
+			// TODO: Krypton has no DeleteKey RPC yet, so we skip upstream cleanup and just drop the finalizer.
+			logger.Info("Backend cannot delete keys; skipping upstream cleanup", "keyID", dk.Status.CryptoState.ID)
+		case err != nil:
 			logger.Error(err, "Failed to delete DomainKey in OpenKCM; will retry", "keyID", dk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
+		default:
+			logger.Info("DomainKey deleted from OpenKCM", "keyID", dk.Status.CryptoState.ID)
 		}
-		logger.Info("DomainKey deleted from OpenKCM", "keyID", dk.Status.CryptoState.ID)
 	}
 
 	controllerutil.RemoveFinalizer(dk, domainKeyFinalizer)

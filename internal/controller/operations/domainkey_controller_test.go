@@ -239,4 +239,22 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(backend.createKeyCalls).To(BeEmpty(),
 			"a linked root that is not active yet blocks the domain key")
 	})
+
+	It("drops the finalizer when the backend cannot delete the key", func() {
+		ensureRegisteredTenant()
+		dk := newDomainKey("")
+		drive(reconciler, dk, 4)
+		Expect(reloadDomainKey(dk.Name).Status.CryptoState.ID).NotTo(BeEmpty())
+
+		backend.noDelete = true
+		Expect(k8sClient.Delete(ctx, reloadDomainKey(dk.Name))).To(Succeed())
+
+		drive(reconciler, dk, 1)
+
+		Expect(backend.deleteKeyCalls).NotTo(BeEmpty(),
+			"the reconciler must still attempt the upstream delete")
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: dk.Name, Namespace: domainKeyNamespace}, &operationsv1alpha1.DomainKey{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+			"the finalizer must be dropped so the CR is reaped even though Krypton cannot delete the key")
+	})
 })

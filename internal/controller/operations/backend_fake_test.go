@@ -35,7 +35,7 @@ type fakeBackend struct {
 	getTenantCalls    []string
 	deleteTenantCalls []string
 
-	// noDelete makes DeleteTenant answer like the Krypton client does.
+	// noDelete makes DeleteTenant and DeleteKey answer like the Krypton client does.
 	noDelete bool
 
 	createKeyCalls   []openkcmapi.CreateKeyRequest
@@ -114,7 +114,11 @@ func (f *fakeBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyRe
 func (f *fakeBackend) DeleteKey(_ context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteKeyCalls = append(f.deleteKeyCalls, id)
+	noDelete := f.noDelete
 	f.mu.Unlock()
+	if noDelete {
+		return errors.ErrUnsupported
+	}
 	return nil
 }
 func (f *fakeBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
