@@ -106,3 +106,52 @@ func TestKeyClientAgainstLiveKrypton(t *testing.T) {
 		t.Logf("orphan K1 rejected as expected: %v", err)
 	}
 }
+
+// TestBackendAgainstLiveKrypton drives the adapter end to end: one CreateKey
+// call must seed the tenant root and announce the domain key under it, then be
+// readable and activatable by the opaque id alone.
+func TestBackendAgainstLiveKrypton(t *testing.T) {
+	addr := os.Getenv("KRYPTON_TEST_ADDR")
+	if addr == "" {
+		t.Skip("set KRYPTON_TEST_ADDR to run against a live Krypton")
+	}
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	b := NewBackend(conn, BackendOptions{})
+	ctx := t.Context()
+	tag := fmt.Sprintf("be-%d", time.Now().UnixNano())
+
+	// given a tenant
+	tenant, err := b.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: tag})
+	if err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+
+	// when a domain key is created with no explicit root or parent
+	created, err := b.CreateKey(ctx, openkcmapi.CreateKeyRequest{
+		TenantID: tenant.ID, Kind: "L2", Name: "domain-" + tag,
+	})
+	if err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+
+	// then the id carries the tenant and the key reads back and activates
+	if _, _, err := unpackKeyID(created.ID); err != nil {
+		t.Fatalf("returned id is not a packed handle: %v", err)
+	}
+	if _, err := b.GetKey(ctx, created.ID); err != nil {
+		t.Fatalf("GetKey: %v", err)
+	}
+	act, err := b.ActivateKey(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("ActivateKey: %v", err)
+	}
+	if act.LifecycleState != string(shared.LifecycleActive) {
+		t.Errorf("activated domain key lifecycle = %q, want Active", act.LifecycleState)
+	}
+}
