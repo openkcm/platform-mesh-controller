@@ -57,7 +57,7 @@ func effectiveDesiredLifecycle(
 // are not user-settable and are ignored on the desired-state side.
 func reconcileLifecycle(
 	ctx context.Context,
-	apiClient Backend,
+	apiClient keyLifecycler,
 	keyID string,
 	current shared.LifecycleState,
 	desired shared.DesiredLifecycle,

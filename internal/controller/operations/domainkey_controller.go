@@ -47,7 +47,7 @@ const (
 
 // DomainKeyReconciler reconciles a DomainKey object across KCP workspaces.
 type DomainKeyReconciler struct {
-	APIClient        Backend
+	APIClient        DomainKeyBackend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
@@ -89,12 +89,6 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
-	}
-
-	if awaitingPrimaryRootKeyLink(dk) {
-		r.setFailedCondition(ctx, cl, dk, "AwaitingPrimaryRootKey",
-			"Domain Key is awaiting linkage. Register a KMS backend (L1) and edit this Domain Key to attach it.")
-		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	// Child≤parent invariant: effective desired is clamped by primary L1
@@ -186,6 +180,20 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 	return ctrl.Result{}, nil
 }
 
+// resolveTenantID reads the backend tenant id the Tenant reconciler recorded on
+// the account's Tenant. An empty result means the tenant is not registered yet.
+func (r *DomainKeyReconciler) resolveTenantID(ctx context.Context, cl client.Client, accountName string) (string, error) {
+	tenant := &operationsv1alpha1.Tenant{}
+	key := types.NamespacedName{Namespace: defaultAccountNamespace(r.AccountNamespace), Name: accountName}
+	if err := cl.Get(ctx, key, tenant); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return tenant.Annotations[tenantIDAnnotation], nil
+}
+
 // createDomainKey is Step 1 of Reconcile: register the tenant and create
 // the L2 key in OpenKCM. Returns the result to bubble up to Reconcile.
 func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) (ctrl.Result, error) {
@@ -203,16 +211,19 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 			"specName", dk.Spec.TenantNameRef, "accountName", accountName)
 	}
 
-	tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{
-		Name: accountName,
-	})
+	tenantID, err := r.resolveTenantID(ctx, cl, accountName)
 	if err != nil {
-		r.setFailedCondition(ctx, cl, dk, "TenantCreateFailed", err.Error())
+		r.setFailedCondition(ctx, cl, dk, "TenantResolutionFailed", err.Error())
 		return ctrl.Result{}, err
+	}
+	if tenantID == "" {
+		r.setFailedCondition(ctx, cl, dk, "AwaitingTenant",
+			"Tenant is not registered in the backend yet; waiting.")
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
-		TenantID: tenantResp.ID,
+		TenantID: tenantID,
 		Kind:     "L2",
 		Name:     domainKeyOpenKCMName(dk),
 	})
@@ -221,7 +232,7 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("DomainKey created in OpenKCM", "keyID", keyResp.ID, "tenantID", tenantResp.ID)
+	logger.Info("DomainKey created in OpenKCM", "keyID", keyResp.ID, "tenantID", tenantID)
 	now := metav1.Now()
 	dk.Status.CryptoState = &shared.CryptoState{
 		ID:             keyResp.ID,
@@ -325,12 +336,6 @@ func rootKeyResolutionFailureResult(err error) (ctrl.Result, bool) {
 	return ctrl.Result{RequeueAfter: pollInterval}, true
 }
 
-func awaitingPrimaryRootKeyLink(dk *operationsv1alpha1.DomainKey) bool {
-	ref := dk.Spec.PrimaryRootKeyRef
-	return (ref == nil || ref.Name == "") &&
-		(dk.Status.CryptoState == nil || dk.Status.CryptoState.ID == "")
-}
-
 // primaryRootKeyLifecycle reads the lifecycle state of the L1 referenced by
 // dk.spec.primaryRootKeyRef without erroring when the L1 is non-Active.
 // Used to clamp the DomainKey's effective desired lifecycle by the parent's
@@ -341,7 +346,9 @@ func awaitingPrimaryRootKeyLink(dk *operationsv1alpha1.DomainKey) bool {
 func (r *DomainKeyReconciler) primaryRootKeyLifecycle(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) (shared.LifecycleState, error) {
 	ref := dk.Spec.PrimaryRootKeyRef
 	if ref == nil || ref.Name == "" {
-		return "", nil
+		// No linked root: the domain key hangs off Krypton's default root,
+		// which is always active, so nothing clamps its lifecycle.
+		return shared.LifecycleActive, nil
 	}
 	gvr := rootKeyGVK(ref.Kind)
 	if gvr == nil {
@@ -370,11 +377,9 @@ func (r *DomainKeyReconciler) primaryRootKeyLifecycle(ctx context.Context, cl cl
 func (r *DomainKeyReconciler) resolvePrimaryRootKey(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) error {
 	ref := dk.Spec.PrimaryRootKeyRef
 	if ref == nil || ref.Name == "" {
-		// Auto-created DKs land here until the user links an L1; treat this
-		// as pending (retryable) rather than a hard failure.
-		return &rootKeyPendingError{
-			err: fmt.Errorf("spec.primaryRootKeyRef is not set; awaiting linkage"),
-		}
+		// No linked root: the domain key uses Krypton's default root, which
+		// the backend seeds. There is nothing to resolve here.
+		return nil
 	}
 
 	gvr := rootKeyGVK(ref.Kind)
@@ -412,11 +417,17 @@ func (r *DomainKeyReconciler) handleDeletion(ctx context.Context, cl client.Clie
 	}
 
 	if dk.Status.CryptoState != nil && dk.Status.CryptoState.ID != "" {
-		if err := r.APIClient.DeleteKey(ctx, dk.Status.CryptoState.ID); err != nil {
+		err := r.APIClient.DeleteKey(ctx, dk.Status.CryptoState.ID)
+		switch {
+		case errors.Is(err, errors.ErrUnsupported):
+			// TODO: Krypton has no DeleteKey RPC yet, so we skip upstream cleanup and just drop the finalizer.
+			logger.Info("Backend cannot delete keys; skipping upstream cleanup", "keyID", dk.Status.CryptoState.ID)
+		case err != nil:
 			logger.Error(err, "Failed to delete DomainKey in OpenKCM; will retry", "keyID", dk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
+		default:
+			logger.Info("DomainKey deleted from OpenKCM", "keyID", dk.Status.CryptoState.ID)
 		}
-		logger.Info("DomainKey deleted from OpenKCM", "keyID", dk.Status.CryptoState.ID)
 	}
 
 	controllerutil.RemoveFinalizer(dk, domainKeyFinalizer)

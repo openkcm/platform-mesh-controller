@@ -19,14 +19,11 @@ package kryptongrpc
 import (
 	"context"
 	"errors"
-	"net"
 	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 
 	kryptonadmin "github.com/openkcm/krypton/pkg/api/v1/proto/admin"
 
@@ -61,27 +58,9 @@ func (s *stubTenantService) GetTenant(
 }
 
 func newClientAgainst(t *testing.T, stub *stubTenantService) *TenantClient {
-	t.Helper()
-
-	lis := bufconn.Listen(1024 * 1024)
-	srv := grpc.NewServer()
-	kryptonadmin.RegisterTenantServiceServer(srv, stub)
-	go func() { _ = srv.Serve(lis) }()
-
-	conn, err := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = conn.Close()
-		srv.Stop()
-	})
-	return NewTenantClient(conn)
+	return NewTenantClient(bufconnDial(t, func(s *grpc.Server) {
+		kryptonadmin.RegisterTenantServiceServer(s, stub)
+	}))
 }
 
 func TestCreateTenantReturnsKryptonID(t *testing.T) {

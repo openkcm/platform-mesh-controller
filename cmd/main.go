@@ -95,10 +95,10 @@ func main() {
 	flag.StringVar(&kryptonAddr,
 		"krypton-grpc-addr",
 		"",
-		"Krypton admin gRPC address (host:port). When set, Tenant reconciliation "+
-			"talks to Krypton instead of the OpenKCM HTTP API. The connection is "+
-			"currently plaintext: transport security for the showroom gateway is "+
-			"unresolved.",
+		"Krypton admin gRPC address (host:port). When set, Tenant and DomainKey "+
+			"reconciliation talk to Krypton instead of the OpenKCM HTTP API. The "+
+			"connection is currently plaintext: transport security for the showroom "+
+			"gateway is unresolved.",
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics bind address")
 	flag.BoolVar(&metricsSecure, "metrics-secure", false, "Serve metrics over HTTPS with Kubernetes authn/authz")
@@ -188,10 +188,11 @@ func main() {
 
 	apiClient := openkcmapi.NewClient(openkcmAPIURL)
 
-	// Tenant is the first slice moved onto Krypton's real gRPC API. Every
-	// other reconciler still speaks the mock's HTTP surface, so both clients
-	// coexist until each slice is migrated in turn.
+	// Tenant and DomainKey are the slices moved onto Krypton's real gRPC API.
+	// Every other reconciler still speaks the mock's HTTP surface, so both
+	// clients coexist until each slice is migrated in turn.
 	var tenantBackend operationscontroller.TenantBackend = apiClient
+	var domainKeyBackend operationscontroller.DomainKeyBackend = apiClient
 	if kryptonAddr != "" {
 		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
@@ -200,7 +201,8 @@ func main() {
 		}
 		defer func() { _ = conn.Close() }()
 		tenantBackend = kryptongrpc.NewTenantClient(conn)
-		setupLog.Info("Tenant reconciliation bound to Krypton", "addr", kryptonAddr)
+		domainKeyBackend = kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
+		setupLog.Info("Tenant and DomainKey reconciliation bound to Krypton", "addr", kryptonAddr)
 	}
 
 	kcpCfg, err := clientcmd.BuildConfigFromFlags("", kcpKubeconfig)
@@ -267,7 +269,7 @@ func main() {
 	}
 
 	if err := (&operationscontroller.DomainKeyReconciler{
-		APIClient:        apiClient,
+		APIClient:        domainKeyBackend,
 		AccountNamespace: tenantNamespace,
 	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "DomainKey")

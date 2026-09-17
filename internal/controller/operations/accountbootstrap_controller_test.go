@@ -18,6 +18,7 @@ import (
 
 const (
 	testOpenBaoRootKeyKind = "OpenBaoRootKey"
+	testAWSRootKeyKind     = "AWSRootKey"
 	testRegion             = "eu-central"
 	openkcmAudience        = "openkcm"
 	igCleanAccount         = "ig-clean-account"
@@ -210,7 +211,7 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 	if dk.Spec.PrimaryRootKeyRef == nil {
 		t.Fatal("dk primaryRootKeyRef is nil")
 	}
-	if dk.Spec.PrimaryRootKeyRef.Kind != "AWSRootKey" ||
+	if dk.Spec.PrimaryRootKeyRef.Kind != testAWSRootKeyKind ||
 		dk.Spec.PrimaryRootKeyRef.Namespace != defaultTenantNamespace ||
 		dk.Spec.PrimaryRootKeyRef.Name != accountFallback {
 		t.Fatalf("primaryRootKeyRef = %#v, want AWSRootKey/default/account-fallback", dk.Spec.PrimaryRootKeyRef)
@@ -427,7 +428,7 @@ func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 	}
 }
 
-func TestDomainKeyPrimaryRootKeyLifecycleTreatsClearedRefAsInactiveParent(t *testing.T) {
+func TestDomainKeyPrimaryRootKeyLifecycleWithoutRefUsesDefaultRoot(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
@@ -454,13 +455,13 @@ func TestDomainKeyPrimaryRootKeyLifecycleTreatsClearedRefAsInactiveParent(t *tes
 
 	state, err := reconciler.primaryRootKeyLifecycle(ctx, cl, domainKey)
 	if err != nil {
-		t.Fatalf("primaryRootKeyLifecycle cleared ref: %v", err)
+		t.Fatalf("primaryRootKeyLifecycle without ref: %v", err)
 	}
-	if state != "" {
-		t.Fatalf("primaryRootKeyLifecycle state = %q, want empty for cleared ref", state)
+	if state != shared.LifecycleActive {
+		t.Fatalf("primaryRootKeyLifecycle state = %q, want Active (default root)", state)
 	}
-	if got := effectiveDesiredLifecycle(domainKey.Spec.Lifecycle, state); got != shared.DesiredLifecycleDeactivated {
-		t.Fatalf("effective desired with cleared ref = %q, want Deactivated", got)
+	if got := effectiveDesiredLifecycle(domainKey.Spec.Lifecycle, state); got != shared.DesiredLifecycleActive {
+		t.Fatalf("effective desired without ref = %q, want Active", got)
 	}
 }
 
