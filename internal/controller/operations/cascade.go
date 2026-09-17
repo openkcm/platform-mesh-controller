@@ -32,14 +32,13 @@ func ensureParentDomainKey(ctx context.Context, cl client.Client, namespace, fal
 		return "", err
 	}
 	var winner *operationsv1alpha1.DomainKey
-	for i := range dks.Items {
-		dk := &dks.Items[i]
+	for _, dk := range dks.Items {
 		if !dk.DeletionTimestamp.IsZero() {
 			continue
 		}
 		if winner == nil || dk.CreationTimestamp.Before(&winner.CreationTimestamp) ||
 			(dk.CreationTimestamp.Equal(&winner.CreationTimestamp) && dk.Name < winner.Name) {
-			winner = dk
+			winner = &dk
 		}
 	}
 	if winner != nil {
