@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +49,7 @@ type DataEncryptionKeyReconciler struct {
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=dataencryptionkeys,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=dataencryptionkeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=dataencryptionkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys,verbs=get;create
 
 func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
@@ -71,6 +73,10 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	if handled, res, err := r.ensureParentServiceKeyLink(ctx, cl, dek); handled {
+		return res, err
 	}
 
 	// Resolve the parent ServiceKey by name (sibling in same workspace).
@@ -238,6 +244,40 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *DataEncryptionKeyReconciler) ensureParentServiceKeyLink(ctx context.Context, cl client.Client, dek *operationsv1alpha1.DataEncryptionKey) (bool, ctrl.Result, error) {
+	name := dek.Spec.ServiceKeyRef
+	if name != "" {
+		sk := &operationsv1alpha1.ServiceKey{}
+		err := cl.Get(ctx, types.NamespacedName{Namespace: dek.Namespace, Name: name}, sk)
+		if err == nil {
+			return false, ctrl.Result{}, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return true, ctrl.Result{}, err
+		}
+	}
+	accountName, err := resolveAccountName(ctx, cl)
+	if err != nil {
+		r.setFailed(ctx, cl, dek, "TenantResolutionFailed", err.Error())
+		return true, ctrl.Result{}, err
+	}
+	if name == "" {
+		name = dek.Name
+	}
+	if err := ensureServiceKey(ctx, cl, dek.Namespace, name, accountName); err != nil {
+		r.setFailed(ctx, cl, dek, "ServiceKeyCreateFailed", err.Error())
+		return true, ctrl.Result{}, err
+	}
+	if dek.Spec.ServiceKeyRef != name {
+		dek.Spec.ServiceKeyRef = name
+		if err := cl.Update(ctx, dek); err != nil {
+			return true, ctrl.Result{}, err
+		}
+		return true, ctrl.Result{}, nil
+	}
+	return true, ctrl.Result{RequeueAfter: pollInterval}, nil
 }
 
 func (r *DataEncryptionKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, dek *operationsv1alpha1.DataEncryptionKey) (ctrl.Result, error) {
