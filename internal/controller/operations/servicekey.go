@@ -37,7 +37,11 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
+const (
+	serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
+	// A service key sits one tier below the domain key it hangs off.
+	serviceKeyKind = "L3"
+)
 
 // ServiceKeyReconciler reconciles a ServiceKey object across KCP workspaces.
 //
@@ -220,7 +224,7 @@ func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.C
 
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenantID,
-		Kind:     "L3",
+		Kind:     serviceKeyKind,
 		Name:     sk.Name,
 		ParentID: dk.Status.CryptoState.ID,
 	})

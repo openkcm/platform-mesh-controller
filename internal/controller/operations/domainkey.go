@@ -43,6 +43,7 @@ const (
 	domainKeyFinalizer = "operations.openkcm.io/domainkey-cleanup"
 	pollInterval       = 5 * time.Second
 	domainKeyTypeTeam  = "Team"
+	domainKeyKind      = "L2"
 )
 
 // DomainKeyReconciler reconciles a DomainKey object across KCP workspaces.
@@ -223,7 +224,7 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenantID,
-		Kind:     "L2",
+		Kind:     domainKeyKind,
 		Name:     domainKeyOpenKCMName(dk),
 	})
 	if err != nil {
