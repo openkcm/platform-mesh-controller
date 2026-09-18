@@ -37,6 +37,22 @@ const (
 	processingStateReady = openkcmapi.ProcessingStateReady
 )
 
+type accountIdentity struct {
+	Name      string
+	Namespace string
+}
+
+func resolveAccount(ctx context.Context, cl client.Client, accountNamespace string) (accountIdentity, error) {
+	name, err := resolveAccountName(ctx, cl)
+	if err != nil {
+		return accountIdentity{}, err
+	}
+	return accountIdentity{
+		Name:      name,
+		Namespace: defaultAccountNamespace(accountNamespace),
+	}, nil
+}
+
 // workspacePath looks up the LogicalCluster in the given workspace and
 // returns its KCP path annotation (for example root:orgs:acme:dev).
 func workspacePath(ctx context.Context, cl client.Client) (string, error) {

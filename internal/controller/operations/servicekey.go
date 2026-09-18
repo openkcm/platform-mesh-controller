@@ -47,14 +47,16 @@ const serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
 // (PreActive|Active|Suspended|Deactivated|Compromised|Destroyed) back into
 // status as OpenKCM transitions it.
 type ServiceKeyReconciler struct {
-	APIClient Backend
-	Manager   mcmanager.Manager
+	APIClient        Backend
+	Manager          mcmanager.Manager
+	AccountNamespace string
 }
 
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys/finalizers,verbs=update
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
 // Reconcile handles ServiceKey create/update/delete events from KCP workspaces.
 func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -201,20 +203,23 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey, dk *operationsv1alpha1.DomainKey) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	accountName, err := resolveAccountName(ctx, cl)
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
 		return ctrl.Result{}, err
 	}
-
-	tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
+	tenantID, err := resolveTenantID(ctx, cl, account)
 	if err != nil {
-		r.setFailedCondition(ctx, cl, sk, "TenantCreateFailed", err.Error())
+		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
 		return ctrl.Result{}, err
+	}
+	if tenantID == "" {
+		r.setFailedCondition(ctx, cl, sk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
-		TenantID: tenantResp.ID,
+		TenantID: tenantID,
 		Kind:     "L3",
 		Name:     sk.Name,
 		ParentID: dk.Status.CryptoState.ID,
@@ -262,16 +267,16 @@ func (r *ServiceKeyReconciler) ensureParentDomainKeyLink(ctx context.Context, cl
 			return true, ctrl.Result{}, err
 		}
 	}
-	accountName, err := resolveAccountName(ctx, cl)
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
 		return true, ctrl.Result{}, err
 	}
 	fallbackName := sk.Spec.DomainKeyRef
 	if fallbackName == "" {
-		fallbackName = accountName
+		fallbackName = account.Name
 	}
-	domainKeyName, err := ensureParentDomainKey(ctx, cl, sk.Namespace, fallbackName, accountName)
+	domainKeyName, err := ensureParentDomainKey(ctx, cl, sk.Namespace, fallbackName, account.Name)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "DomainKeyCreateFailed", err.Error())
 		return true, ctrl.Result{}, err

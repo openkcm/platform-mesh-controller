@@ -86,9 +86,8 @@ type store struct {
 	tenants map[string]*tenantRecord // keyed by ID
 	keys    map[string]*keyRecord    // keyed by ID
 
-	// secondary indexes for idempotent creates
-	tenantsByName map[string]string      // name -> ID
-	keysByKey     map[keyDedupKey]string // dedup tuple -> ID
+	// Secondary index for idempotent key creates.
+	keysByKey map[keyDedupKey]string // dedup tuple -> ID
 
 	provisioningDelay time.Duration
 	log               *slog.Logger
@@ -110,7 +109,6 @@ func newStore(delay time.Duration, logger *slog.Logger, p *persister) *store {
 	s := &store{
 		tenants:           make(map[string]*tenantRecord),
 		keys:              make(map[string]*keyRecord),
-		tenantsByName:     make(map[string]string),
 		keysByKey:         make(map[keyDedupKey]string),
 		provisioningDelay: delay,
 		log:               logger.With("component", "mockapi"),
@@ -127,10 +125,6 @@ func newStore(delay time.Duration, logger *slog.Logger, p *persister) *store {
 		} else {
 			s.tenants = state.Tenants
 			s.keys = state.Keys
-			// Rebuild secondary indexes.
-			for id, t := range s.tenants {
-				s.tenantsByName[t.Name] = id
-			}
 			for id, k := range s.keys {
 				s.keysByKey[keyDedupKey{
 					TenantID: k.TenantID,
@@ -295,24 +289,12 @@ func (s *store) createTenant(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Idempotent: return existing tenant if name matches
-	if existingID, ok := s.tenantsByName[req.Name]; ok {
-		t := s.tenants[existingID]
-		writeJSON(w, http.StatusAccepted, tenantResponse{
-			ID:              existingID,
-			Name:            t.Name,
-			ProcessingState: s.stateForAge(t.CreatedAt),
-		})
-		return
-	}
-
 	id := uuid.New().String()
 	s.tenants[id] = &tenantRecord{
 		ID:        id,
 		Name:      req.Name,
 		CreatedAt: time.Now(),
 	}
-	s.tenantsByName[req.Name] = id
 	s.persist()
 
 	s.log.Info("tenant created", "id", id, "name", req.Name)
@@ -998,7 +980,6 @@ func (s *store) deleteTenant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	delete(s.tenants, id)
-	delete(s.tenantsByName, t.Name)
 	s.persist()
 
 	s.log.Info("tenant deleted", "id", id, "name", t.Name)

@@ -42,14 +42,16 @@ const dataEncryptionKeyFinalizer = "operations.openkcm.io/dataencryptionkey-clea
 // DataEncryptionKeyReconciler reconciles a DataEncryptionKey (L4). Requires
 // the parent ServiceKey to be at lifecycleState=Active before provisioning.
 type DataEncryptionKeyReconciler struct {
-	APIClient Backend
-	Manager   mcmanager.Manager
+	APIClient        Backend
+	Manager          mcmanager.Manager
+	AccountNamespace string
 }
 
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=dataencryptionkeys,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=dataencryptionkeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=dataencryptionkeys/finalizers,verbs=update
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys,verbs=get;create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
 func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
@@ -116,57 +118,7 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 	}
 
 	if dek.Status.CryptoState == nil || dek.Status.CryptoState.ID == "" {
-		accountName, err := resolveAccountName(ctx, cl)
-		if err != nil {
-			r.setFailed(ctx, cl, dek, "TenantResolutionFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
-		if err != nil {
-			r.setFailed(ctx, cl, dek, "TenantCreateFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-
-		var attrs map[string]string
-		if dek.Spec.KMIP != nil {
-			attrs = dek.Spec.KMIP.Attributes
-		}
-		resp, err := r.APIClient.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
-			TenantID:       tenantResp.ID,
-			ServiceKeyID:   sk.Status.CryptoState.ID,
-			Name:           dek.Name,
-			KMIPAttributes: attrs,
-		})
-		if err != nil {
-			r.setFailed(ctx, cl, dek, "DEKCreateFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		logger.Info("DataEncryptionKey created", "dekID", resp.ID, "serviceKeyID", sk.Status.CryptoState.ID)
-
-		now := metav1.Now()
-		dek.Status.CryptoState = &shared.CryptoState{
-			ID:             resp.ID,
-			LifecycleState: shared.LifecyclePreActive,
-		}
-		dek.Status.OperationID = resp.ID
-		dek.Status.ReconciliationStatus = &shared.ReconciliationStatus{
-			Success:            true,
-			Message:            "DEK created in OpenKCM; awaiting activation.",
-			InternalKeyID:      resp.ID,
-			LastTransitionTime: &now,
-		}
-		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-			Type:               readyType,
-			Status:             metav1.ConditionFalse,
-			Reason:             reasonProcess,
-			Message:            "DEK created, awaiting activation",
-			ObservedGeneration: dek.Generation,
-		})
-		dek.Status.ObservedGeneration = dek.Generation
-		if err := cl.Status().Update(ctx, dek); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: pollInterval}, nil
+		return r.createDataEncryptionKey(ctx, cl, dek, sk)
 	}
 
 	resp, err := r.APIClient.GetDEK(ctx, dek.Status.CryptoState.ID)
@@ -246,6 +198,68 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 	return ctrl.Result{}, nil
 }
 
+func (r *DataEncryptionKeyReconciler) createDataEncryptionKey(
+	ctx context.Context,
+	cl client.Client,
+	dek *operationsv1alpha1.DataEncryptionKey,
+	sk *operationsv1alpha1.ServiceKey,
+) (ctrl.Result, error) {
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
+	if err != nil {
+		r.setFailed(ctx, cl, dek, "TenantResolutionFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	tenantID, err := resolveTenantID(ctx, cl, account)
+	if err != nil {
+		r.setFailed(ctx, cl, dek, "TenantResolutionFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	if tenantID == "" {
+		r.setFailed(ctx, cl, dek, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+
+	var attrs map[string]string
+	if dek.Spec.KMIP != nil {
+		attrs = dek.Spec.KMIP.Attributes
+	}
+	resp, err := r.APIClient.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
+		TenantID:       tenantID,
+		ServiceKeyID:   sk.Status.CryptoState.ID,
+		Name:           dek.Name,
+		KMIPAttributes: attrs,
+	})
+	if err != nil {
+		r.setFailed(ctx, cl, dek, "DEKCreateFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+
+	now := metav1.Now()
+	dek.Status.CryptoState = &shared.CryptoState{
+		ID:             resp.ID,
+		LifecycleState: shared.LifecyclePreActive,
+	}
+	dek.Status.OperationID = resp.ID
+	dek.Status.ReconciliationStatus = &shared.ReconciliationStatus{
+		Success:            true,
+		Message:            "DEK created in OpenKCM; awaiting activation.",
+		InternalKeyID:      resp.ID,
+		LastTransitionTime: &now,
+	}
+	meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonProcess,
+		Message:            "DEK created, awaiting activation",
+		ObservedGeneration: dek.Generation,
+	})
+	dek.Status.ObservedGeneration = dek.Generation
+	if err := cl.Status().Update(ctx, dek); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
 func (r *DataEncryptionKeyReconciler) ensureParentServiceKeyLink(ctx context.Context, cl client.Client, dek *operationsv1alpha1.DataEncryptionKey) (bool, ctrl.Result, error) {
 	name := dek.Spec.ServiceKeyRef
 	if name != "" {
@@ -258,7 +272,7 @@ func (r *DataEncryptionKeyReconciler) ensureParentServiceKeyLink(ctx context.Con
 			return true, ctrl.Result{}, err
 		}
 	}
-	accountName, err := resolveAccountName(ctx, cl)
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 	if err != nil {
 		r.setFailed(ctx, cl, dek, "TenantResolutionFailed", err.Error())
 		return true, ctrl.Result{}, err
@@ -266,7 +280,7 @@ func (r *DataEncryptionKeyReconciler) ensureParentServiceKeyLink(ctx context.Con
 	if name == "" {
 		name = dek.Name
 	}
-	if err := ensureServiceKey(ctx, cl, dek.Namespace, name, accountName); err != nil {
+	if err := ensureServiceKey(ctx, cl, dek.Namespace, name, account.Name); err != nil {
 		r.setFailed(ctx, cl, dek, "ServiceKeyCreateFailed", err.Error())
 		return true, ctrl.Result{}, err
 	}

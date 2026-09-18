@@ -48,6 +48,7 @@ type AWSRootKeyReconciler struct {
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
 func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
@@ -81,23 +82,27 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
-		accountName, err := resolveAccountName(ctx, cl)
+		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != accountName {
+		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != account.Name {
 			logger.Info("ignoring spec.tenantNameRef; using path-derived account",
-				"specName", rk.Spec.TenantNameRef, "accountName", accountName)
+				"specName", rk.Spec.TenantNameRef, "accountName", account.Name)
 		}
-		tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
+		tenantID, err := resolveTenantID(ctx, cl, account)
 		if err != nil {
-			r.setFailed(ctx, cl, rk, "TenantCreateFailed", err.Error())
+			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
+		}
+		if tenantID == "" {
+			r.setFailed(ctx, cl, rk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+			return ctrl.Result{RequeueAfter: pollInterval}, nil
 		}
 
 		resp, err := r.APIClient.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
-			TenantID: tenantResp.ID,
+			TenantID: tenantID,
 			Provider: "aws",
 			Name:     rk.Name,
 			Config: map[string]string{
@@ -127,7 +132,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			InternalKeyID:      resp.ID,
 			LastTransitionTime: &now,
 			IdentityInfo: &shared.IdentityInfo{
-				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
+				Subject: "CN=" + account.Name + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
 					Name:      "aws-kms-ca",
 					Namespace: openkcmSystemNamespace,

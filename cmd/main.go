@@ -276,7 +276,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&operationscontroller.ServiceKeyReconciler{APIClient: apiClient}).SetupWithManager(opsMgr); err != nil {
+	if err := (&operationscontroller.ServiceKeyReconciler{
+		APIClient:        apiClient,
+		AccountNamespace: tenantNamespace,
+	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ServiceKey")
 		os.Exit(1)
 	}
@@ -306,7 +309,8 @@ func main() {
 	}
 
 	if err := (&operationscontroller.DataEncryptionKeyReconciler{
-		APIClient: apiClient,
+		APIClient:        apiClient,
+		AccountNamespace: tenantNamespace,
 	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "DataEncryptionKey")
 		os.Exit(1)
