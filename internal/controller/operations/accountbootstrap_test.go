@@ -1,9 +1,11 @@
-package operations
+package operations_test
 
 import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -14,19 +16,25 @@ import (
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 const (
-	testOpenBaoRootKeyKind = "OpenBaoRootKey"
-	testAWSRootKeyKind     = "AWSRootKey"
-	testRegion             = "eu-central"
-	openkcmAudience        = "openkcm"
-	igCleanAccount         = "ig-clean-account"
-	igCleanAccountRoot     = "ig-clean-account-root"
-	accountRoot            = "account-root"
-	accountFallback        = "account-fallback"
-	teamA                  = "team-a"
-	igorTenant             = "igor"
+	testOpenBaoRootKeyKind      = "OpenBaoRootKey"
+	testAWSRootKeyKind          = "AWSRootKey"
+	testRegion                  = "eu-central"
+	testDefaultTenantNamespace  = "default"
+	testBootstrapAnnotation     = "operations.openkcm.io/bootstrap"
+	testBootstrapAnnotationAuto = "auto"
+	testDomainKeyTypeTeam       = "Team"
+	testDomainKeyFinalizer      = "operations.openkcm.io/domainkey-cleanup"
+	openkcmAudience             = "openkcm"
+	igCleanAccount              = "ig-clean-account"
+	igCleanAccountRoot          = "ig-clean-account-root"
+	accountRoot                 = "account-root"
+	accountFallback             = "account-fallback"
+	teamA                       = "team-a"
+	igorTenant                  = "igor"
 )
 
 func TestIsOperationsAPIBinding(t *testing.T) {
@@ -34,101 +42,85 @@ func TestIsOperationsAPIBinding(t *testing.T) {
 		Name: "openkcm",
 		Spec: kcpapisv1alpha2.APIBindingSpec{
 			Reference: kcpapisv1alpha2.BindingReference{
-				Export: &kcpapisv1alpha2.ExportBindingReference{Name: operationsAPIExportName},
+				Export: &kcpapisv1alpha2.ExportBindingReference{Name: "operations.openkcm.io"},
 			},
 		},
 	}
-	if !isOperationsAPIBinding(binding) {
-		t.Fatal("operations.openkcm.io APIBinding was not recognized")
-	}
+	assert.True(t, operations.IsOperationsAPIBindingForTest(binding))
 
 	binding.Spec.Reference.Export.Name = "other.openkcm.io"
-	if isOperationsAPIBinding(binding) {
-		t.Fatal("non-operations APIBinding was recognized")
-	}
+	assert.False(t, operations.IsOperationsAPIBindingForTest(binding))
 
 	binding.Spec.Reference.Export = nil
-	if isOperationsAPIBinding(binding) {
-		t.Fatal("APIBinding without export reference was recognized")
-	}
+	assert.False(t, operations.IsOperationsAPIBindingForTest(binding))
 }
 
 func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add core scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	reconciler := &AccountBootstrapReconciler{DefaultRegion: testRegion}
+	reconciler := &operations.AccountBootstrapReconciler{DefaultRegion: testRegion}
 	accountName := igCleanAccount
-	if err := reconciler.ensureTenant(ctx, cl, defaultTenantNamespace, accountName); err != nil {
-		t.Fatalf("ensure tenant: %v", err)
-	}
-	if err := reconciler.ensureDomainKey(ctx, cl, defaultTenantNamespace, accountName); err != nil {
-		t.Fatalf("ensure domain key: %v", err)
-	}
+	require.NoError(t, operations.EnsureTenantForTest(
+		reconciler,
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		accountName,
+	))
+	require.NoError(t, operations.EnsureDomainKeyForTest(
+		reconciler,
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		accountName,
+	))
 
 	tenant := &operationsv1alpha1.Tenant{}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: accountName}, tenant); err != nil {
-		t.Fatalf("get tenant: %v", err)
-	}
-	if tenant.Spec.Region != testRegion {
-		t.Fatalf("tenant region = %q, want eu-central", tenant.Spec.Region)
-	}
-	if tenant.Annotations[bootstrapAnnotation] != bootstrapAnnotationAuto {
-		t.Fatalf("tenant bootstrap annotation = %q, want auto", tenant.Annotations[bootstrapAnnotation])
-	}
+	require.NoError(t, cl.Get(
+		ctx,
+		types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: accountName},
+		tenant,
+	))
+	assert.Equal(t, testRegion, tenant.Spec.Region)
+	assert.Equal(t, testBootstrapAnnotationAuto, tenant.Annotations[testBootstrapAnnotation])
 
-	// DomainKey must be auto-created in an unlinked state (no
-	// primaryRootKeyRef). The DomainKey reconciler will surface
-	// AwaitingPrimaryRootKey until the user links an L1.
 	domainKey := &operationsv1alpha1.DomainKey{}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: accountName}, domainKey); err != nil {
-		t.Fatalf("get domain key: %v", err)
-	}
-	if domainKey.Spec.TenantNameRef != accountName {
-		t.Fatalf("dk tenantNameRef = %q, want %q", domainKey.Spec.TenantNameRef, accountName)
-	}
-	if domainKey.Spec.Type != domainKeyTypeTeam {
-		t.Fatalf("dk type = %q, want Team", domainKey.Spec.Type)
-	}
-	if domainKey.Spec.PrimaryRootKeyRef != nil {
-		t.Fatalf("dk primaryRootKeyRef must be nil at bootstrap, got %#v", domainKey.Spec.PrimaryRootKeyRef)
-	}
-	if domainKey.Annotations[bootstrapAnnotation] != bootstrapAnnotationAuto {
-		t.Fatalf("dk bootstrap annotation = %q, want auto", domainKey.Annotations[bootstrapAnnotation])
-	}
+	require.NoError(t, cl.Get(
+		ctx,
+		types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: accountName},
+		domainKey,
+	))
+	assert.Equal(t, accountName, domainKey.Spec.TenantNameRef)
+	assert.Equal(t, testDomainKeyTypeTeam, domainKey.Spec.Type)
+	assert.Nil(t, domainKey.Spec.PrimaryRootKeyRef)
+	assert.Equal(t, testBootstrapAnnotationAuto, domainKey.Annotations[testBootstrapAnnotation])
 
-	// ensureDomainKey must be idempotent — second call is a no-op.
-	if err := reconciler.ensureDomainKey(ctx, cl, defaultTenantNamespace, accountName); err != nil {
-		t.Fatalf("ensure domain key (second call): %v", err)
-	}
-	dks := &operationsv1alpha1.DomainKeyList{}
-	if err := cl.List(ctx, dks); err != nil {
-		t.Fatalf("list dk: %v", err)
-	}
-	if len(dks.Items) != 1 {
-		t.Fatalf("ensureDomainKey not idempotent, count = %d", len(dks.Items))
-	}
+	require.NoError(t, operations.EnsureDomainKeyForTest(
+		reconciler,
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		accountName,
+	))
+	domainKeys := &operationsv1alpha1.DomainKeyList{}
+	require.NoError(t, cl.List(ctx, domainKeys))
+	assert.Len(t, domainKeys.Items, 1)
 }
 
 func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.OpenBaoRootKey{
 				Name:              accountRoot,
-				Namespace:         defaultTenantNamespace,
+				Namespace:         testDefaultTenantNamespace,
 				CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 				Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
@@ -136,7 +128,7 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 			},
 			&operationsv1alpha1.AWSRootKey{
 				Name:              accountFallback,
-				Namespace:         defaultTenantNamespace,
+				Namespace:         testDefaultTenantNamespace,
 				CreationTimestamp: metav1.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 				Status: operationsv1alpha1.AWSRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
@@ -145,43 +137,35 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 		).
 		Build()
 
-	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, teamA, igorTenant); err != nil {
-		t.Fatalf("ensure auto domain key: %v", err)
-	}
+	require.NoError(t, operations.EnsureAutoDomainKeyForNamespaceForTest(
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		teamA,
+		igorTenant,
+	))
 
-	dk := &operationsv1alpha1.DomainKey{}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: teamA, Name: teamA}, dk); err != nil {
-		t.Fatalf("get domain key: %v", err)
-	}
-	if dk.Annotations[bootstrapAnnotation] != bootstrapAnnotationAuto {
-		t.Fatalf("dk bootstrap annotation = %q, want auto", dk.Annotations[bootstrapAnnotation])
-	}
-	if dk.Spec.PrimaryRootKeyRef == nil {
-		t.Fatal("dk primaryRootKeyRef is nil")
-	}
-	if dk.Spec.PrimaryRootKeyRef.Kind != testOpenBaoRootKeyKind ||
-		dk.Spec.PrimaryRootKeyRef.Namespace != defaultTenantNamespace ||
-		dk.Spec.PrimaryRootKeyRef.Name != accountRoot {
-		t.Fatalf("primaryRootKeyRef = %#v, want OpenBaoRootKey/default/account-root", dk.Spec.PrimaryRootKeyRef)
-	}
-	if len(dk.Spec.FallbackRootKeyRefs) != 0 {
-		t.Fatalf("fallbackRootKeyRefs = %#v, want none", dk.Spec.FallbackRootKeyRefs)
-	}
+	domainKey := &operationsv1alpha1.DomainKey{}
+	require.NoError(t, cl.Get(ctx, types.NamespacedName{Namespace: teamA, Name: teamA}, domainKey))
+	assert.Equal(t, testBootstrapAnnotationAuto, domainKey.Annotations[testBootstrapAnnotation])
+	require.NotNil(t, domainKey.Spec.PrimaryRootKeyRef)
+	assert.Equal(t, testOpenBaoRootKeyKind, domainKey.Spec.PrimaryRootKeyRef.Kind)
+	assert.Equal(t, testDefaultTenantNamespace, domainKey.Spec.PrimaryRootKeyRef.Namespace)
+	assert.Equal(t, accountRoot, domainKey.Spec.PrimaryRootKeyRef.Name)
+	assert.Empty(t, domainKey.Spec.FallbackRootKeyRefs)
 }
 
 func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	deletionTime := metav1.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.OpenBaoRootKey{
 				Name:              "deleting-root",
-				Namespace:         defaultTenantNamespace,
+				Namespace:         testDefaultTenantNamespace,
 				CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 				DeletionTimestamp: &deletionTime,
 				Finalizers:        []string{"openkcm.io/test-finalizer"},
@@ -191,7 +175,7 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 			},
 			&operationsv1alpha1.AWSRootKey{
 				Name:              accountFallback,
-				Namespace:         defaultTenantNamespace,
+				Namespace:         testDefaultTenantNamespace,
 				CreationTimestamp: metav1.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 				Status: operationsv1alpha1.AWSRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
@@ -200,74 +184,67 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 		).
 		Build()
 
-	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, teamA, igorTenant); err != nil {
-		t.Fatalf("ensure auto domain key: %v", err)
-	}
+	require.NoError(t, operations.EnsureAutoDomainKeyForNamespaceForTest(
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		teamA,
+		igorTenant,
+	))
 
-	dk := &operationsv1alpha1.DomainKey{}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: teamA, Name: teamA}, dk); err != nil {
-		t.Fatalf("get domain key: %v", err)
-	}
-	if dk.Spec.PrimaryRootKeyRef == nil {
-		t.Fatal("dk primaryRootKeyRef is nil")
-	}
-	if dk.Spec.PrimaryRootKeyRef.Kind != testAWSRootKeyKind ||
-		dk.Spec.PrimaryRootKeyRef.Namespace != defaultTenantNamespace ||
-		dk.Spec.PrimaryRootKeyRef.Name != accountFallback {
-		t.Fatalf("primaryRootKeyRef = %#v, want AWSRootKey/default/account-fallback", dk.Spec.PrimaryRootKeyRef)
-	}
+	domainKey := &operationsv1alpha1.DomainKey{}
+	require.NoError(t, cl.Get(ctx, types.NamespacedName{Namespace: teamA, Name: teamA}, domainKey))
+	require.NotNil(t, domainKey.Spec.PrimaryRootKeyRef)
+	assert.Equal(t, testAWSRootKeyKind, domainKey.Spec.PrimaryRootKeyRef.Kind)
+	assert.Equal(t, testDefaultTenantNamespace, domainKey.Spec.PrimaryRootKeyRef.Namespace)
+	assert.Equal(t, accountFallback, domainKey.Spec.PrimaryRootKeyRef.Name)
 }
 
 func TestAutoDomainKeyNameKeepsAccountNamespaceCompatible(t *testing.T) {
-	if got := autoDomainKeyName(defaultTenantNamespace, defaultTenantNamespace, igorTenant); got != igorTenant {
-		t.Fatalf("account namespace auto name = %q, want igor", got)
-	}
-	if got := autoDomainKeyName(defaultTenantNamespace, teamA, igorTenant); got != teamA {
-		t.Fatalf("namespace auto name = %q, want team-a", got)
-	}
+	assert.Equal(
+		t,
+		igorTenant,
+		operations.AutoDomainKeyNameForTest(testDefaultTenantNamespace, testDefaultTenantNamespace, igorTenant),
+	)
+	assert.Equal(
+		t,
+		teamA,
+		operations.AutoDomainKeyNameForTest(testDefaultTenantNamespace, teamA, igorTenant),
+	)
 }
 
 func TestDomainKeyOpenKCMNameIncludesNamespace(t *testing.T) {
-	dk := &operationsv1alpha1.DomainKey{
-		Name: "payments", Namespace: teamA,
-	}
-	if got := domainKeyOpenKCMName(dk); got != "team-a.payments" {
-		t.Fatalf("OpenKCM name = %q, want team-a.payments", got)
-	}
+	domainKey := &operationsv1alpha1.DomainKey{Name: "payments", Namespace: teamA}
+	assert.Equal(t, "team-a.payments", operations.DomainKeyOpenKCMNameForTest(domainKey))
 }
 
 func TestEnsureAutoDomainKeysForAccountRootSkipsNamespaceLocalRoot(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	if err := ensureAutoDomainKeysForAccountRoot(ctx, cl, teamA, defaultTenantNamespace); err != nil {
-		t.Fatalf("ensure auto domain keys: %v", err)
-	}
+	require.NoError(t, operations.EnsureAutoDomainKeysForAccountRootForTest(
+		ctx,
+		cl,
+		teamA,
+		testDefaultTenantNamespace,
+	))
 
-	dks := &operationsv1alpha1.DomainKeyList{}
-	if err := cl.List(ctx, dks); err != nil {
-		t.Fatalf("list domain keys: %v", err)
-	}
-	if len(dks.Items) != 0 {
-		t.Fatalf("domain keys = %#v, want none", dks.Items)
-	}
+	domainKeys := &operationsv1alpha1.DomainKeyList{}
+	require.NoError(t, cl.List(ctx, domainKeys))
+	assert.Empty(t, domainKeys.Items)
 }
 
 func TestEnsureAutoDomainKeyForNamespaceSkipsExistingDomainKey(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.OpenBaoRootKey{
-				Name: accountRoot, Namespace: defaultTenantNamespace,
+				Name: accountRoot, Namespace: testDefaultTenantNamespace,
 				Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 				},
@@ -275,45 +252,44 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsExistingDomainKey(t *testing.T) {
 			&operationsv1alpha1.DomainKey{
 				Name: "custom-domain", Namespace: teamA,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          domainKeyTypeTeam,
+					Type:          testDomainKeyTypeTeam,
 					TenantNameRef: igorTenant,
 				},
 			},
 		).
 		Build()
 
-	if err := ensureAutoDomainKeyForNamespace(ctx, cl, defaultTenantNamespace, teamA, igorTenant); err != nil {
-		t.Fatalf("ensure auto domain key: %v", err)
-	}
+	require.NoError(t, operations.EnsureAutoDomainKeyForNamespaceForTest(
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		teamA,
+		igorTenant,
+	))
 
-	dks := &operationsv1alpha1.DomainKeyList{}
-	if err := cl.List(ctx, dks, client.InNamespace(teamA)); err != nil {
-		t.Fatalf("list domain keys: %v", err)
-	}
-	if len(dks.Items) != 1 || dks.Items[0].Name != "custom-domain" {
-		t.Fatalf("domain keys = %#v, want only custom-domain", dks.Items)
-	}
+	domainKeys := &operationsv1alpha1.DomainKeyList{}
+	require.NoError(t, cl.List(ctx, domainKeys, client.InNamespace(teamA)))
+	require.Len(t, domainKeys.Items, 1)
+	assert.Equal(t, "custom-domain", domainKeys.Items[0].Name)
 }
 
 func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(&operationsv1alpha1.OpenBaoRootKey{
-			Name: igCleanAccountRoot, Namespace: defaultTenantNamespace,
+			Name: igCleanAccountRoot, Namespace: testDefaultTenantNamespace,
 			Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 				CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 			},
 		}).
 		Build()
 
-	reconciler := &DomainKeyReconciler{AccountNamespace: defaultTenantNamespace}
+	reconciler := &operations.DomainKeyReconciler{AccountNamespace: testDefaultTenantNamespace}
 	domainKey := &operationsv1alpha1.DomainKey{
-		Name: igCleanAccount, Namespace: defaultTenantNamespace,
+		Name: igCleanAccount, Namespace: testDefaultTenantNamespace,
 		Spec: operationsv1alpha1.DomainKeySpec{
 			PrimaryRootKeyRef: &shared.TypedReference{
 				APIGroup: operationsv1alpha1.GroupVersion.Group,
@@ -322,79 +298,65 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 			},
 		},
 	}
-	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err != nil {
-		t.Fatalf("resolve existing OpenBaoRootKey: %v", err)
-	}
+	require.NoError(t, operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey))
 
 	domainKey.Namespace = teamA
-	domainKey.Spec.PrimaryRootKeyRef.Namespace = defaultTenantNamespace
-	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err != nil {
-		t.Fatalf("resolve cross-namespace OpenBaoRootKey: %v", err)
-	}
+	domainKey.Spec.PrimaryRootKeyRef.Namespace = testDefaultTenantNamespace
+	require.NoError(t, operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey))
 
-	domainKey.Namespace = defaultTenantNamespace
+	domainKey.Namespace = testDefaultTenantNamespace
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = ""
 	inactive := &operationsv1alpha1.OpenBaoRootKey{
-		Name: "inactive-root", Namespace: defaultTenantNamespace,
+		Name: "inactive-root", Namespace: testDefaultTenantNamespace,
 		Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 			CryptoState: &shared.CryptoState{LifecycleState: shared.LifecyclePreActive},
 		},
 	}
-	if err := cl.Create(ctx, inactive); err != nil {
-		t.Fatalf("create inactive root key: %v", err)
-	}
+	require.NoError(t, cl.Create(ctx, inactive))
 	domainKey.Spec.PrimaryRootKeyRef.Name = "inactive-root"
-	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err == nil {
-		t.Fatal("resolve inactive root key: got nil error")
-	} else {
-		assertPendingRootKeyResolution(t, err)
-	}
+	err := operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	require.Error(t, err)
+	assertPendingRootKeyResolution(t, err)
 
 	domainKey.Spec.PrimaryRootKeyRef.Name = "missing-root"
-	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err == nil {
-		t.Fatal("resolve missing root key: got nil error")
-	} else {
-		assertPendingRootKeyResolution(t, err)
-	}
+	err = operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	require.Error(t, err)
+	assertPendingRootKeyResolution(t, err)
 
 	domainKey.Spec.PrimaryRootKeyRef.Kind = "NotARootKey"
-	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err == nil {
-		t.Fatal("resolve unsupported root key kind: got nil error")
-	} else if _, ok := rootKeyResolutionFailureResult(err); ok {
-		t.Fatal("resolve unsupported root key kind: got retryable error")
-	}
+	err = operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	require.Error(t, err)
+	_, retryable := operations.RootKeyResolutionFailureResultForTest(err)
+	assert.False(t, retryable)
 
 	domainKey.Spec.PrimaryRootKeyRef.Kind = testOpenBaoRootKeyKind
 	domainKey.Spec.PrimaryRootKeyRef.Name = igCleanAccountRoot
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = "other-team"
-	if err := reconciler.resolvePrimaryRootKey(ctx, cl, domainKey); err == nil {
-		t.Fatal("resolve foreign namespace root key: got nil error")
-	} else if _, ok := rootKeyResolutionFailureResult(err); ok {
-		t.Fatal("resolve foreign namespace root key: got retryable error")
-	}
+	err = operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	require.Error(t, err)
+	_, retryable = operations.RootKeyResolutionFailureResultForTest(err)
+	assert.False(t, retryable)
 }
 
 func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(&operationsv1alpha1.OpenBaoRootKey{
-			Name: accountRoot, Namespace: defaultTenantNamespace,
+			Name: accountRoot, Namespace: testDefaultTenantNamespace,
 			Status: operationsv1alpha1.OpenBaoRootKeyStatus{
 				CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
 			},
 		}).
 		Build()
 
-	reconciler := &DomainKeyReconciler{AccountNamespace: defaultTenantNamespace}
+	reconciler := &operations.DomainKeyReconciler{AccountNamespace: testDefaultTenantNamespace}
 	domainKey := &operationsv1alpha1.DomainKey{
 		Name: teamA, Namespace: teamA,
 		Spec: operationsv1alpha1.DomainKeySpec{
-			Type:          domainKeyTypeTeam,
+			Type:          testDomainKeyTypeTeam,
 			TenantNameRef: igorTenant,
 			PrimaryRootKeyRef: &shared.TypedReference{
 				APIGroup:  operationsv1alpha1.GroupVersion.Group,
@@ -413,34 +375,25 @@ func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 		},
 	}
 
-	state, err := reconciler.primaryRootKeyLifecycle(ctx, cl, domainKey)
-	if err == nil {
-		t.Fatal("primaryRootKeyLifecycle invalid namespace: got nil error")
-	}
-	if state != "" {
-		t.Fatalf("primaryRootKeyLifecycle state = %q, want empty on invalid namespace", state)
-	}
-	if _, ok := rootKeyResolutionFailureResult(err); ok {
-		t.Fatalf("invalid namespace was treated as retryable parent resolution: %v", err)
-	}
-	if domainKey.Status.CryptoState.LifecycleState != shared.LifecycleActive {
-		t.Fatalf("domain key lifecycle mutated to %q, want Active", domainKey.Status.CryptoState.LifecycleState)
-	}
+	state, err := operations.PrimaryRootKeyLifecycleForTest(reconciler, ctx, cl, domainKey)
+	require.Error(t, err)
+	assert.Empty(t, state)
+	_, retryable := operations.RootKeyResolutionFailureResultForTest(err)
+	assert.False(t, retryable)
+	assert.Equal(t, shared.LifecycleActive, domainKey.Status.CryptoState.LifecycleState)
 }
 
 func TestDomainKeyPrimaryRootKeyLifecycleWithoutRefUsesDefaultRoot(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	reconciler := &DomainKeyReconciler{AccountNamespace: defaultTenantNamespace}
+	reconciler := &operations.DomainKeyReconciler{AccountNamespace: testDefaultTenantNamespace}
 	domainKey := &operationsv1alpha1.DomainKey{
 		Name: teamA, Namespace: teamA,
 		Spec: operationsv1alpha1.DomainKeySpec{
-			Type:          domainKeyTypeTeam,
+			Type:          testDomainKeyTypeTeam,
 			TenantNameRef: igorTenant,
 			Lifecycle:     shared.DesiredLifecycleActive,
 		},
@@ -453,123 +406,91 @@ func TestDomainKeyPrimaryRootKeyLifecycleWithoutRefUsesDefaultRoot(t *testing.T)
 		},
 	}
 
-	state, err := reconciler.primaryRootKeyLifecycle(ctx, cl, domainKey)
-	if err != nil {
-		t.Fatalf("primaryRootKeyLifecycle without ref: %v", err)
-	}
-	if state != shared.LifecycleActive {
-		t.Fatalf("primaryRootKeyLifecycle state = %q, want Active (default root)", state)
-	}
-	if got := effectiveDesiredLifecycle(domainKey.Spec.Lifecycle, state); got != shared.DesiredLifecycleActive {
-		t.Fatalf("effective desired without ref = %q, want Active", got)
-	}
+	state, err := operations.PrimaryRootKeyLifecycleForTest(reconciler, ctx, cl, domainKey)
+	require.NoError(t, err)
+	assert.Equal(t, shared.LifecycleActive, state)
+	assert.Equal(
+		t,
+		shared.DesiredLifecycleActive,
+		operations.EffectiveDesiredLifecycleForTest(domainKey.Spec.Lifecycle, state),
+	)
 }
 
 func assertPendingRootKeyResolution(t *testing.T, err error) {
 	t.Helper()
 
-	result, ok := rootKeyResolutionFailureResult(err)
-	if !ok {
-		t.Fatalf("root key resolution error is not retryable: %v", err)
-	}
-	if result.RequeueAfter != pollInterval {
-		t.Fatalf("RequeueAfter = %s, want %s", result.RequeueAfter, pollInterval)
-	}
+	result, retryable := operations.RootKeyResolutionFailureResultForTest(err)
+	require.True(t, retryable)
+	assert.Equal(t, operations.PollIntervalForTest(), result.RequeueAfter)
 }
 
 func TestDomainKeySingleton(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 
-	earlier := &operationsv1alpha1.DomainKey{
+	earliest := &operationsv1alpha1.DomainKey{
 		Name:              "first",
-		Namespace:         defaultTenantNamespace,
+		Namespace:         testDefaultTenantNamespace,
 		CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	later := &operationsv1alpha1.DomainKey{
 		Name:              "second",
-		Namespace:         defaultTenantNamespace,
+		Namespace:         testDefaultTenantNamespace,
 		CreationTimestamp: metav1.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
 	}
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(earlier.DeepCopy(), later.DeepCopy()).
+		WithObjects(earliest.DeepCopy(), later.DeepCopy()).
 		Build()
 
-	reconciler := &DomainKeyReconciler{}
+	reconciler := &operations.DomainKeyReconciler{}
 
-	// "first" has no earlier sibling; it should win.
-	got, err := reconciler.findEarlierDomainKey(ctx, cl, earlier)
-	if err != nil {
-		t.Fatalf("findEarlierDomainKey for earliest: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("earliest DomainKey got rejected by %q", got.Name)
-	}
+	winner, err := operations.FindEarlierDomainKeyForTest(reconciler, ctx, cl, earliest)
+	require.NoError(t, err)
+	assert.Nil(t, winner)
 
-	// "second" should be rejected by "first".
-	got, err = reconciler.findEarlierDomainKey(ctx, cl, later)
-	if err != nil {
-		t.Fatalf("findEarlierDomainKey for later: %v", err)
-	}
-	if got == nil {
-		t.Fatal("later DomainKey was not rejected")
-	}
-	if got.Name != "first" {
-		t.Fatalf("rejected by %q, want %q", got.Name, "first")
-	}
+	winner, err = operations.FindEarlierDomainKeyForTest(reconciler, ctx, cl, later)
+	require.NoError(t, err)
+	require.NotNil(t, winner)
+	assert.Equal(t, "first", winner.Name)
 
-	// Deleted earlier siblings should not block.
 	deletionTime := metav1.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	deletingEarlier := &operationsv1alpha1.DomainKey{
 		Name:              "deleting",
-		Namespace:         defaultTenantNamespace,
+		Namespace:         testDefaultTenantNamespace,
 		CreationTimestamp: metav1.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC),
 		DeletionTimestamp: &deletionTime,
-		Finalizers:        []string{domainKeyFinalizer},
+		Finalizers:        []string{testDomainKeyFinalizer},
 	}
-	cl2 := fake.NewClientBuilder().
+	clWithDeletingSibling := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(deletingEarlier.DeepCopy(), earlier.DeepCopy()).
+		WithObjects(deletingEarlier.DeepCopy(), earliest.DeepCopy()).
 		Build()
-	got, err = reconciler.findEarlierDomainKey(ctx, cl2, earlier)
-	if err != nil {
-		t.Fatalf("findEarlierDomainKey with deleting sibling: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("deleting sibling %q wrongly blocked the new DomainKey", got.Name)
-	}
+	winner, err = operations.FindEarlierDomainKeyForTest(reconciler, ctx, clWithDeletingSibling, earliest)
+	require.NoError(t, err)
+	assert.Nil(t, winner)
 
-	// Same creationTimestamp — deterministic tiebreaker by name.
 	tieA := &operationsv1alpha1.DomainKey{
 		Name:              "alpha",
-		Namespace:         defaultTenantNamespace,
+		Namespace:         testDefaultTenantNamespace,
 		CreationTimestamp: metav1.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 	}
 	tieB := &operationsv1alpha1.DomainKey{
 		Name:              "beta",
-		Namespace:         defaultTenantNamespace,
+		Namespace:         testDefaultTenantNamespace,
 		CreationTimestamp: metav1.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 	}
-	cl3 := fake.NewClientBuilder().
+	clWithTie := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(tieA.DeepCopy(), tieB.DeepCopy()).
 		Build()
-	got, err = reconciler.findEarlierDomainKey(ctx, cl3, tieB)
-	if err != nil {
-		t.Fatalf("findEarlierDomainKey tiebreak: %v", err)
-	}
-	if got == nil || got.Name != "alpha" {
-		t.Fatalf("tiebreak winner = %v, want alpha", got)
-	}
+	winner, err = operations.FindEarlierDomainKeyForTest(reconciler, ctx, clWithTie, tieB)
+	require.NoError(t, err)
+	require.NotNil(t, winner)
+	assert.Equal(t, "alpha", winner.Name)
 }
 
-// The OIDC block is optional in the v0.7.0 schema, so ensureTenant must leave
-// it unset unless the operator was actually configured with defaults — an
-// empty block would claim a trust relationship that does not exist.
 func TestEnsureTenantOIDCDefaulting(t *testing.T) {
 	const accountName = "acme-prod"
 
@@ -610,92 +531,70 @@ func TestEnsureTenantOIDCDefaulting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// given
 			ctx := t.Context()
 			scheme := runtime.NewScheme()
-			if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-				t.Fatalf("add operations scheme: %v", err)
-			}
+			require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 			cl := fake.NewClientBuilder().WithScheme(scheme).Build()
-
-			reconciler := &AccountBootstrapReconciler{
+			reconciler := &operations.AccountBootstrapReconciler{
 				DefaultRegion:        testRegion,
 				DefaultOIDCIssuer:    tt.issuer,
 				DefaultOIDCJWKSURI:   tt.jwksURI,
 				DefaultOIDCAudiences: tt.audiences,
 			}
 
-			// when
-			if err := reconciler.ensureTenant(ctx, cl, defaultTenantNamespace, accountName); err != nil {
-				t.Fatalf("ensure tenant: %v", err)
-			}
+			require.NoError(t, operations.EnsureTenantForTest(
+				reconciler,
+				ctx,
+				cl,
+				testDefaultTenantNamespace,
+				accountName,
+			))
 
-			// then
 			tenant := &operationsv1alpha1.Tenant{}
-			key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: accountName}
-			if err := cl.Get(ctx, key, tenant); err != nil {
-				t.Fatalf("get tenant: %v", err)
-			}
-			if tenant.Spec.Region != testRegion {
-				t.Errorf("region = %q, want eu-central", tenant.Spec.Region)
-			}
+			require.NoError(t, cl.Get(
+				ctx,
+				types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: accountName},
+				tenant,
+			))
+			assert.Equal(t, testRegion, tenant.Spec.Region)
 
-			got := tenant.Spec.OIDCProvider
+			provider := tenant.Spec.OIDCProvider
 			if !tt.wantSet {
-				if got != nil {
-					t.Fatalf("OIDCProvider = %#v, want nil when no defaults are set", got)
-				}
+				assert.Nil(t, provider)
 				return
 			}
-			if got == nil {
-				t.Fatal("OIDCProvider is nil, want it populated from the operator defaults")
-			}
-			if got.Issuer != tt.issuer {
-				t.Errorf("issuer = %q, want %q", got.Issuer, tt.issuer)
-			}
-			if got.JWKSURI != tt.jwksURI {
-				t.Errorf("jwksURI = %q, want %q", got.JWKSURI, tt.jwksURI)
-			}
-			if len(got.Audiences) != len(tt.audiences) {
-				t.Fatalf("audiences = %v, want %v", got.Audiences, tt.audiences)
-			}
-			for i, a := range tt.audiences {
-				if got.Audiences[i] != a {
-					t.Errorf("audiences[%d] = %q, want %q", i, got.Audiences[i], a)
-				}
-			}
+			require.NotNil(t, provider)
+			assert.Equal(t, tt.issuer, provider.Issuer)
+			assert.Equal(t, tt.jwksURI, provider.JWKSURI)
+			assert.Equal(t, tt.audiences, provider.Audiences)
 		})
 	}
 }
 
-// The audience slice is copied rather than aliased, so a later mutation of the
-// operator's configuration cannot reach back into an already-created Tenant.
 func TestEnsureTenantCopiesAudiences(t *testing.T) {
-	// given
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	audiences := []string{openkcmAudience}
-	reconciler := &AccountBootstrapReconciler{DefaultOIDCAudiences: audiences}
-
-	// when
-	if err := reconciler.ensureTenant(ctx, cl, defaultTenantNamespace, "acme-prod"); err != nil {
-		t.Fatalf("ensure tenant: %v", err)
-	}
+	reconciler := &operations.AccountBootstrapReconciler{DefaultOIDCAudiences: audiences}
+	require.NoError(t, operations.EnsureTenantForTest(
+		reconciler,
+		ctx,
+		cl,
+		testDefaultTenantNamespace,
+		"acme-prod",
+	))
 	audiences[0] = "mutated"
 
-	// then
 	tenant := &operationsv1alpha1.Tenant{}
-	key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: "acme-prod"}
-	if err := cl.Get(ctx, key, tenant); err != nil {
-		t.Fatalf("get tenant: %v", err)
-	}
-	if tenant.Spec.OIDCProvider.Audiences[0] != openkcmAudience {
-		t.Errorf("audiences[0] = %q, want openkcm: the slice must be copied, not aliased",
-			tenant.Spec.OIDCProvider.Audiences[0])
-	}
+	require.NoError(t, cl.Get(
+		ctx,
+		types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: "acme-prod"},
+		tenant,
+	))
+	require.NotNil(t, tenant.Spec.OIDCProvider)
+	require.NotEmpty(t, tenant.Spec.OIDCProvider.Audiences)
+	assert.Equal(t, openkcmAudience, tenant.Spec.OIDCProvider.Audiences[0])
 }

@@ -16,7 +16,11 @@ limitations under the License.
 
 package operations
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 // accountNameFromPath is the security boundary for tenant identity: the
 // account is taken from where the workspace lives, never from a field a user
@@ -77,12 +81,8 @@ func TestAccountNameFromPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := accountNameFromPath(tt.path)
-			if ok != tt.ok {
-				t.Fatalf("ok = %v, want %v", ok, tt.ok)
-			}
-			if got != tt.want {
-				t.Fatalf("accountName = %q, want %q", got, tt.want)
-			}
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -99,9 +99,7 @@ func TestDefaultAccountNamespace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := defaultAccountNamespace(tt.given); got != tt.want {
-				t.Errorf("defaultAccountNamespace(%q) = %q, want %q", tt.given, got, tt.want)
-			}
+			assert.Equal(t, tt.want, defaultAccountNamespace(tt.given))
 		})
 	}
 }
