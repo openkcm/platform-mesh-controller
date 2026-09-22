@@ -135,6 +135,14 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 				},
 			},
 			&operationsv1alpha1.ServiceKey{
+				Name: "sk-3", Namespace: testDefaultTenantNamespace,
+				Spec: operationsv1alpha1.ServiceKeySpec{
+					TenantNameRef: accountRef,
+					DomainKeyRef:  "dk-1",
+					Lifecycle:     shared.DesiredLifecycleActive,
+				},
+			},
+			&operationsv1alpha1.ServiceKey{
 				Name: "sk-2", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.ServiceKeySpec{
 					TenantNameRef: accountRef,
@@ -186,6 +194,7 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 		want shared.DesiredLifecycle
 	}{
 		{"sk:sk-1", shared.DesiredLifecycleDeactivated},
+		{"sk:sk-3", shared.DesiredLifecycleDeactivated},
 		{"sk:sk-2", shared.DesiredLifecycleActive},
 		{"dek:dek-1a", shared.DesiredLifecycleDeactivated},
 		{"dek:dek-other", shared.DesiredLifecycleActive},
