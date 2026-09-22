@@ -14,12 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 // accountNameFromPath is the security boundary for tenant identity: the
@@ -80,7 +82,7 @@ func TestAccountNameFromPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := accountNameFromPath(tt.path)
+			got, ok := operations.AccountNameFromPath(tt.path)
 			assert.Equal(t, tt.ok, ok)
 			assert.Equal(t, tt.want, got)
 		})
@@ -93,13 +95,13 @@ func TestDefaultAccountNamespace(t *testing.T) {
 		given string
 		want  string
 	}{
-		{name: "empty falls back", given: "", want: defaultTenantNamespace},
+		{name: "empty falls back", given: "", want: testDefaultTenantNamespace},
 		{name: "explicit value is kept", given: teamA, want: teamA},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, defaultAccountNamespace(tt.given))
+			assert.Equal(t, tt.want, operations.DefaultAccountNamespace(tt.given))
 		})
 	}
 }

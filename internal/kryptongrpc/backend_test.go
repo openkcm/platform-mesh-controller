@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kryptongrpc
+package kryptongrpc_test
 
 import (
 	"context"
@@ -23,11 +23,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	kryptonkeys "github.com/openkcm/krypton/pkg/api/v1/proto/admin/keys"
 
 	"github.com/openkcm/openkcm-controller/api/shared"
+	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -70,8 +73,8 @@ func (s *fakeKeyServer) AnnounceKey(
 		TenantId:           req.GetTenantId(),
 		Kind:               req.GetKind(),
 		ParentId:           req.GetParentId(),
-		LifeCycleState:     kryptonKeyLifecyclePreActivation,
-		KeyProcessingState: &kryptonkeys.KeyProcessingState{Status: kryptonProcessingCompleted},
+		LifeCycleState:     kryptongrpc.KryptonKeyLifecyclePreActivation,
+		KeyProcessingState: &kryptonkeys.KeyProcessingState{Status: kryptongrpc.KryptonProcessingCompleted},
 	}
 	s.byName[nameKey] = key
 	s.byID[req.GetTenantId()+"|"+key.Id] = key
@@ -99,16 +102,16 @@ func (s *fakeKeyServer) ActivateKey(
 
 	s.activateSeen = append(s.activateSeen, req.GetId())
 	if key, ok := s.byID[req.GetTenantId()+"|"+req.GetId()]; ok {
-		key.LifeCycleState = kryptonKeyLifecycleActive
+		key.LifeCycleState = kryptongrpc.KryptonKeyLifecycleActive
 	}
 	return &kryptonkeys.ActivateKeyResponse{}, nil
 }
 
-func newBackendAgainst(t *testing.T, srv *fakeKeyServer) *Backend {
+func newBackendAgainst(t *testing.T, srv *fakeKeyServer) *kryptongrpc.Backend {
 	conn := bufconnDial(t, func(s *grpc.Server) {
 		kryptonkeys.RegisterKeyServiceServer(s, srv)
 	})
-	return NewBackend(conn, BackendOptions{})
+	return kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
 }
 
 func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
@@ -122,42 +125,28 @@ func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 	})
 
 	// then
-	if err != nil {
-		t.Fatalf("CreateKey: %v", err)
-	}
-	if resp.ID != "tenant-1/key-2" {
-		t.Errorf("packed id = %q, want %q", resp.ID, "tenant-1/key-2")
-	}
+	require.NoError(t, err, "CreateKey")
+	assert.Equal(t, "tenant-1/key-2", resp.ID, "packed id")
 
 	// the root (K0) was announced and activated before the domain key (K1)
-	if len(srv.announceLog) != 2 {
-		t.Fatalf("announced %d keys, want 2 (root + domain)", len(srv.announceLog))
-	}
-	if srv.announceLog[0].GetKind() != "K0" || srv.announceLog[0].GetParentId() != "" {
-		t.Errorf("first announce = kind %q parent %q, want K0 with no parent",
-			srv.announceLog[0].GetKind(), srv.announceLog[0].GetParentId())
-	}
-	if srv.announceLog[1].GetKind() != "K1" || srv.announceLog[1].GetParentId() != "key-1" {
-		t.Errorf("second announce = kind %q parent %q, want K1 under key-1",
-			srv.announceLog[1].GetKind(), srv.announceLog[1].GetParentId())
-	}
-	if len(srv.activateSeen) != 1 || srv.activateSeen[0] != "key-1" {
-		t.Errorf("activated %v, want only the root key-1", srv.activateSeen)
-	}
+	require.Len(t, srv.announceLog, 2, "announced keys, want 2 (root + domain)")
+	assert.Equal(t, "K0", srv.announceLog[0].GetKind(), "first announce kind, want K0 with no parent")
+	assert.Empty(t, srv.announceLog[0].GetParentId(), "first announce parent, want K0 with no parent")
+	assert.Equal(t, "K1", srv.announceLog[1].GetKind(), "second announce kind, want K1 under key-1")
+	assert.Equal(t, "key-1", srv.announceLog[1].GetParentId(), "second announce parent, want K1 under key-1")
+	assert.Equal(t, []string{"key-1"}, srv.activateSeen, "activated, want only the root key-1")
 }
 
 func TestBackendReusesRootAcrossKeys(t *testing.T) {
 	// given a backend that already made one key
 	srv := newFakeKeyServer()
 	b := newBackendAgainst(t, srv)
-	if _, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L2", Name: "a"}); err != nil {
-		t.Fatalf("first CreateKey: %v", err)
-	}
+	_, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L2", Name: "a"})
+	require.NoError(t, err, "first CreateKey")
 
 	// when a second key is created for the same tenant
-	if _, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L2", Name: "b"}); err != nil {
-		t.Fatalf("second CreateKey: %v", err)
-	}
+	_, err = b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L2", Name: "b"})
+	require.NoError(t, err, "second CreateKey")
 
 	// then the root is announced again by name but not re-activated
 	roots := 0
@@ -166,12 +155,8 @@ func TestBackendReusesRootAcrossKeys(t *testing.T) {
 			roots++
 		}
 	}
-	if roots != 2 {
-		t.Errorf("root announced %d times, want 2 idempotent calls", roots)
-	}
-	if len(srv.activateSeen) != 1 {
-		t.Errorf("root activated %d times, want 1", len(srv.activateSeen))
-	}
+	assert.Equal(t, 2, roots, "root announcements, want 2 idempotent calls")
+	assert.Len(t, srv.activateSeen, 1, "root activations")
 }
 
 func TestBackendGetAndActivateUnpackTenant(t *testing.T) {
@@ -179,47 +164,32 @@ func TestBackendGetAndActivateUnpackTenant(t *testing.T) {
 	srv := newFakeKeyServer()
 	b := newBackendAgainst(t, srv)
 	created, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "tid", Kind: "L2", Name: "k"})
-	if err != nil {
-		t.Fatalf("CreateKey: %v", err)
-	}
+	require.NoError(t, err, "CreateKey")
 
 	// when reading and activating it by the opaque id
 	got, err := b.GetKey(t.Context(), created.ID)
-	if err != nil {
-		t.Fatalf("GetKey: %v", err)
-	}
-	if got.ID != created.ID {
-		t.Errorf("GetKey id = %q, want the opaque id %q", got.ID, created.ID)
-	}
+	require.NoError(t, err, "GetKey")
+	assert.Equal(t, created.ID, got.ID, "GetKey id, want the opaque id")
 	act, err := b.ActivateKey(t.Context(), created.ID)
-	if err != nil {
-		t.Fatalf("ActivateKey: %v", err)
-	}
-	if act.LifecycleState != string(shared.LifecycleActive) {
-		t.Errorf("activated lifecycle = %q, want Active", act.LifecycleState)
-	}
+	require.NoError(t, err, "ActivateKey")
+	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated lifecycle")
 }
 
 func TestBackendRejectsUnknownLevel(t *testing.T) {
 	b := newBackendAgainst(t, newFakeKeyServer())
-	if _, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L9", Name: "x"}); err == nil {
-		t.Fatal("an unconfigured level must be rejected")
-	}
+	_, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L9", Name: "x"})
+	require.Error(t, err, "an unconfigured level must be rejected")
 }
 
 func TestBackendRejectsMalformedID(t *testing.T) {
 	b := newBackendAgainst(t, newFakeKeyServer())
-	if _, err := b.GetKey(t.Context(), "no-separator"); err == nil {
-		t.Fatal("a key id without a tenant must be rejected")
-	}
+	_, err := b.GetKey(t.Context(), "no-separator")
+	require.Error(t, err, "a key id without a tenant must be rejected")
 }
 
 func TestBackendKeyOpsUnsupportedByKrypton(t *testing.T) {
 	b := newBackendAgainst(t, newFakeKeyServer())
-	if _, err := b.DeactivateKey(t.Context(), "t/k"); !errors.Is(err, errors.ErrUnsupported) {
-		t.Errorf("DeactivateKey error = %v, want ErrUnsupported", err)
-	}
-	if err := b.DeleteKey(t.Context(), "t/k"); !errors.Is(err, errors.ErrUnsupported) {
-		t.Errorf("DeleteKey error = %v, want ErrUnsupported", err)
-	}
+	_, err := b.DeactivateKey(t.Context(), "t/k")
+	assert.ErrorIs(t, err, errors.ErrUnsupported, "DeactivateKey error")
+	assert.ErrorIs(t, b.DeleteKey(t.Context(), "t/k"), errors.ErrUnsupported, "DeleteKey error")
 }

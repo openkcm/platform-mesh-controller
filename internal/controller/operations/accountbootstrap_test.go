@@ -46,13 +46,13 @@ func TestIsOperationsAPIBinding(t *testing.T) {
 			},
 		},
 	}
-	assert.True(t, operations.IsOperationsAPIBindingForTest(binding))
+	assert.True(t, operations.IsOperationsAPIBinding(binding))
 
 	binding.Spec.Reference.Export.Name = "other.openkcm.io"
-	assert.False(t, operations.IsOperationsAPIBindingForTest(binding))
+	assert.False(t, operations.IsOperationsAPIBinding(binding))
 
 	binding.Spec.Reference.Export = nil
-	assert.False(t, operations.IsOperationsAPIBindingForTest(binding))
+	assert.False(t, operations.IsOperationsAPIBinding(binding))
 }
 
 func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) {
@@ -64,14 +64,14 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 
 	reconciler := &operations.AccountBootstrapReconciler{DefaultRegion: testRegion}
 	accountName := igCleanAccount
-	require.NoError(t, operations.EnsureTenantForTest(
+	require.NoError(t, operations.EnsureTenant(
 		reconciler,
 		ctx,
 		cl,
 		testDefaultTenantNamespace,
 		accountName,
 	))
-	require.NoError(t, operations.EnsureDomainKeyForTest(
+	require.NoError(t, operations.EnsureDomainKey(
 		reconciler,
 		ctx,
 		cl,
@@ -99,7 +99,7 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 	assert.Nil(t, domainKey.Spec.PrimaryRootKeyRef)
 	assert.Equal(t, testBootstrapAnnotationAuto, domainKey.Annotations[testBootstrapAnnotation])
 
-	require.NoError(t, operations.EnsureDomainKeyForTest(
+	require.NoError(t, operations.EnsureDomainKey(
 		reconciler,
 		ctx,
 		cl,
@@ -137,7 +137,7 @@ func TestEnsureAutoDomainKeyForNamespaceUsesAccountRootKey(t *testing.T) {
 		).
 		Build()
 
-	require.NoError(t, operations.EnsureAutoDomainKeyForNamespaceForTest(
+	require.NoError(t, operations.EnsureAutoDomainKeyForNamespace(
 		ctx,
 		cl,
 		testDefaultTenantNamespace,
@@ -184,7 +184,7 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsDeletingRootKey(t *testing.T) {
 		).
 		Build()
 
-	require.NoError(t, operations.EnsureAutoDomainKeyForNamespaceForTest(
+	require.NoError(t, operations.EnsureAutoDomainKeyForNamespace(
 		ctx,
 		cl,
 		testDefaultTenantNamespace,
@@ -204,18 +204,18 @@ func TestAutoDomainKeyNameKeepsAccountNamespaceCompatible(t *testing.T) {
 	assert.Equal(
 		t,
 		igorTenant,
-		operations.AutoDomainKeyNameForTest(testDefaultTenantNamespace, testDefaultTenantNamespace, igorTenant),
+		operations.AutoDomainKeyName(testDefaultTenantNamespace, testDefaultTenantNamespace, igorTenant),
 	)
 	assert.Equal(
 		t,
 		teamA,
-		operations.AutoDomainKeyNameForTest(testDefaultTenantNamespace, teamA, igorTenant),
+		operations.AutoDomainKeyName(testDefaultTenantNamespace, teamA, igorTenant),
 	)
 }
 
 func TestDomainKeyOpenKCMNameIncludesNamespace(t *testing.T) {
 	domainKey := &operationsv1alpha1.DomainKey{Name: "payments", Namespace: teamA}
-	assert.Equal(t, "team-a.payments", operations.DomainKeyOpenKCMNameForTest(domainKey))
+	assert.Equal(t, "team-a.payments", operations.DomainKeyOpenKCMName(domainKey))
 }
 
 func TestEnsureAutoDomainKeysForAccountRootSkipsNamespaceLocalRoot(t *testing.T) {
@@ -224,7 +224,7 @@ func TestEnsureAutoDomainKeysForAccountRootSkipsNamespaceLocalRoot(t *testing.T)
 	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-	require.NoError(t, operations.EnsureAutoDomainKeysForAccountRootForTest(
+	require.NoError(t, operations.EnsureAutoDomainKeysForAccountRoot(
 		ctx,
 		cl,
 		teamA,
@@ -259,7 +259,7 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsExistingDomainKey(t *testing.T) {
 		).
 		Build()
 
-	require.NoError(t, operations.EnsureAutoDomainKeyForNamespaceForTest(
+	require.NoError(t, operations.EnsureAutoDomainKeyForNamespace(
 		ctx,
 		cl,
 		testDefaultTenantNamespace,
@@ -298,11 +298,11 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey))
+	require.NoError(t, operations.ResolvePrimaryRootKey(reconciler, ctx, cl, domainKey))
 
 	domainKey.Namespace = teamA
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = testDefaultTenantNamespace
-	require.NoError(t, operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey))
+	require.NoError(t, operations.ResolvePrimaryRootKey(reconciler, ctx, cl, domainKey))
 
 	domainKey.Namespace = testDefaultTenantNamespace
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = ""
@@ -314,27 +314,27 @@ func TestDomainKeyPrimaryRootKeyResolution(t *testing.T) {
 	}
 	require.NoError(t, cl.Create(ctx, inactive))
 	domainKey.Spec.PrimaryRootKeyRef.Name = "inactive-root"
-	err := operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	err := operations.ResolvePrimaryRootKey(reconciler, ctx, cl, domainKey)
 	require.Error(t, err)
 	assertPendingRootKeyResolution(t, err)
 
 	domainKey.Spec.PrimaryRootKeyRef.Name = "missing-root"
-	err = operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	err = operations.ResolvePrimaryRootKey(reconciler, ctx, cl, domainKey)
 	require.Error(t, err)
 	assertPendingRootKeyResolution(t, err)
 
 	domainKey.Spec.PrimaryRootKeyRef.Kind = "NotARootKey"
-	err = operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	err = operations.ResolvePrimaryRootKey(reconciler, ctx, cl, domainKey)
 	require.Error(t, err)
-	_, retryable := operations.RootKeyResolutionFailureResultForTest(err)
+	_, retryable := operations.RootKeyResolutionFailureResult(err)
 	assert.False(t, retryable)
 
 	domainKey.Spec.PrimaryRootKeyRef.Kind = testOpenBaoRootKeyKind
 	domainKey.Spec.PrimaryRootKeyRef.Name = igCleanAccountRoot
 	domainKey.Spec.PrimaryRootKeyRef.Namespace = "other-team"
-	err = operations.ResolvePrimaryRootKeyForTest(reconciler, ctx, cl, domainKey)
+	err = operations.ResolvePrimaryRootKey(reconciler, ctx, cl, domainKey)
 	require.Error(t, err)
-	_, retryable = operations.RootKeyResolutionFailureResultForTest(err)
+	_, retryable = operations.RootKeyResolutionFailureResult(err)
 	assert.False(t, retryable)
 }
 
@@ -375,10 +375,10 @@ func TestDomainKeyPrimaryRootKeyLifecycleRejectsInvalidNamespace(t *testing.T) {
 		},
 	}
 
-	state, err := operations.PrimaryRootKeyLifecycleForTest(reconciler, ctx, cl, domainKey)
+	state, err := operations.PrimaryRootKeyLifecycle(reconciler, ctx, cl, domainKey)
 	require.Error(t, err)
 	assert.Empty(t, state)
-	_, retryable := operations.RootKeyResolutionFailureResultForTest(err)
+	_, retryable := operations.RootKeyResolutionFailureResult(err)
 	assert.False(t, retryable)
 	assert.Equal(t, shared.LifecycleActive, domainKey.Status.CryptoState.LifecycleState)
 }
@@ -406,22 +406,22 @@ func TestDomainKeyPrimaryRootKeyLifecycleWithoutRefUsesDefaultRoot(t *testing.T)
 		},
 	}
 
-	state, err := operations.PrimaryRootKeyLifecycleForTest(reconciler, ctx, cl, domainKey)
+	state, err := operations.PrimaryRootKeyLifecycle(reconciler, ctx, cl, domainKey)
 	require.NoError(t, err)
 	assert.Equal(t, shared.LifecycleActive, state)
 	assert.Equal(
 		t,
 		shared.DesiredLifecycleActive,
-		operations.EffectiveDesiredLifecycleForTest(domainKey.Spec.Lifecycle, state),
+		operations.EffectiveDesiredLifecycle(domainKey.Spec.Lifecycle, state),
 	)
 }
 
 func assertPendingRootKeyResolution(t *testing.T, err error) {
 	t.Helper()
 
-	result, retryable := operations.RootKeyResolutionFailureResultForTest(err)
+	result, retryable := operations.RootKeyResolutionFailureResult(err)
 	require.True(t, retryable)
-	assert.Equal(t, operations.PollIntervalForTest(), result.RequeueAfter)
+	assert.Equal(t, operations.PollInterval, result.RequeueAfter)
 }
 
 func TestDomainKeySingleton(t *testing.T) {
@@ -446,11 +446,11 @@ func TestDomainKeySingleton(t *testing.T) {
 
 	reconciler := &operations.DomainKeyReconciler{}
 
-	winner, err := operations.FindEarlierDomainKeyForTest(reconciler, ctx, cl, earliest)
+	winner, err := operations.FindEarlierDomainKey(reconciler, ctx, cl, earliest)
 	require.NoError(t, err)
 	assert.Nil(t, winner)
 
-	winner, err = operations.FindEarlierDomainKeyForTest(reconciler, ctx, cl, later)
+	winner, err = operations.FindEarlierDomainKey(reconciler, ctx, cl, later)
 	require.NoError(t, err)
 	require.NotNil(t, winner)
 	assert.Equal(t, "first", winner.Name)
@@ -467,7 +467,7 @@ func TestDomainKeySingleton(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(deletingEarlier.DeepCopy(), earliest.DeepCopy()).
 		Build()
-	winner, err = operations.FindEarlierDomainKeyForTest(reconciler, ctx, clWithDeletingSibling, earliest)
+	winner, err = operations.FindEarlierDomainKey(reconciler, ctx, clWithDeletingSibling, earliest)
 	require.NoError(t, err)
 	assert.Nil(t, winner)
 
@@ -485,7 +485,7 @@ func TestDomainKeySingleton(t *testing.T) {
 		WithScheme(scheme).
 		WithObjects(tieA.DeepCopy(), tieB.DeepCopy()).
 		Build()
-	winner, err = operations.FindEarlierDomainKeyForTest(reconciler, ctx, clWithTie, tieB)
+	winner, err = operations.FindEarlierDomainKey(reconciler, ctx, clWithTie, tieB)
 	require.NoError(t, err)
 	require.NotNil(t, winner)
 	assert.Equal(t, "alpha", winner.Name)
@@ -542,7 +542,7 @@ func TestEnsureTenantOIDCDefaulting(t *testing.T) {
 				DefaultOIDCAudiences: tt.audiences,
 			}
 
-			require.NoError(t, operations.EnsureTenantForTest(
+			require.NoError(t, operations.EnsureTenant(
 				reconciler,
 				ctx,
 				cl,
@@ -579,7 +579,7 @@ func TestEnsureTenantCopiesAudiences(t *testing.T) {
 
 	audiences := []string{openkcmAudience}
 	reconciler := &operations.AccountBootstrapReconciler{DefaultOIDCAudiences: audiences}
-	require.NoError(t, operations.EnsureTenantForTest(
+	require.NoError(t, operations.EnsureTenant(
 		reconciler,
 		ctx,
 		cl,

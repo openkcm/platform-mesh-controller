@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
@@ -31,6 +31,8 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 	"sigs.k8s.io/multicluster-runtime/providers/single"
+
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 const (
@@ -71,14 +73,14 @@ func ensureLogicalCluster(path string) {
 	lc := &kcpcorev1alpha1.LogicalCluster{}
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: "cluster"}, lc)
 	if err == nil {
-		lc.Annotations = map[string]string{pathAnnotation: path}
+		lc.Annotations = map[string]string{operations.PathAnnotation: path}
 		Expect(k8sClient.Update(ctx, lc)).To(Succeed())
 		return
 	}
 
 	lc = &kcpcorev1alpha1.LogicalCluster{}
 	lc.Name = "cluster"
-	lc.Annotations = map[string]string{pathAnnotation: path}
+	lc.Annotations = map[string]string{operations.PathAnnotation: path}
 	Expect(k8sClient.Create(ctx, lc)).To(Succeed())
 }
 

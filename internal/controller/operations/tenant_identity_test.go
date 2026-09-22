@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"testing"
@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 func TestResolveTenantID(t *testing.T) {
@@ -32,7 +33,7 @@ func TestResolveTenantID(t *testing.T) {
 
 	scheme := runtime.NewScheme()
 	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
-	account := accountIdentity{Name: "acme", Namespace: "accounts"}
+	account := operations.AccountIdentity{Name: "acme", Namespace: "accounts"}
 
 	t.Run("returns the recorded backend identity", func(t *testing.T) {
 		t.Parallel()
@@ -40,10 +41,10 @@ func TestResolveTenantID(t *testing.T) {
 		tenant := &operationsv1alpha1.Tenant{}
 		tenant.Name = account.Name
 		tenant.Namespace = account.Namespace
-		tenant.Annotations = map[string]string{tenantIDAnnotation: "tenant-id"}
+		tenant.Annotations = map[string]string{operations.TenantIDAnnotation: "tenant-id"}
 		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
 
-		id, err := resolveTenantID(t.Context(), client, account)
+		id, err := operations.ResolveTenantID(t.Context(), client, account)
 
 		require.NoError(t, err)
 		assert.Equal(t, "tenant-id", id)
@@ -54,7 +55,7 @@ func TestResolveTenantID(t *testing.T) {
 
 		client := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-		id, err := resolveTenantID(t.Context(), client, account)
+		id, err := operations.ResolveTenantID(t.Context(), client, account)
 
 		require.NoError(t, err)
 		assert.Empty(t, id)

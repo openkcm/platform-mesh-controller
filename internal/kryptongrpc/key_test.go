@@ -1,13 +1,16 @@
-package kryptongrpc
+package kryptongrpc_test
 
 import (
 	"context"
 	"testing"
 
 	kryptonkeys "github.com/openkcm/krypton/pkg/api/v1/proto/admin/keys"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/openkcm/openkcm-controller/api/shared"
+	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -24,8 +27,8 @@ type stubKeyService struct {
 	activateFn func(req *kryptonkeys.ActivateKeyRequest) (*kryptonkeys.ActivateKeyResponse, error)
 }
 
-func newKeyClientAgainst(t *testing.T, stub *stubKeyService) *KeyClient {
-	return NewKeyClient(bufconnDial(t, func(s *grpc.Server) {
+func newKeyClientAgainst(t *testing.T, stub *stubKeyService) *kryptongrpc.KeyClient {
+	return kryptongrpc.NewKeyClient(bufconnDial(t, func(s *grpc.Server) {
 		kryptonkeys.RegisterKeyServiceServer(s, stub)
 	}))
 }
@@ -42,7 +45,7 @@ func (s *stubKeyService) ActivateKey(_ context.Context, req *kryptonkeys.Activat
 
 // keyClientReturning wires a stub whose GetKey hands back the given key,
 // which is all most of these tests need.
-func keyClientReturning(t *testing.T, key *kryptonkeys.Key) *KeyClient {
+func keyClientReturning(t *testing.T, key *kryptonkeys.Key) *kryptongrpc.KeyClient {
 	return newKeyClientAgainst(t, &stubKeyService{
 		getFn: func(*kryptonkeys.GetKeyRequest) (*kryptonkeys.GetKeyResponse, error) {
 			return &kryptonkeys.GetKeyResponse{Key: key}, nil
@@ -56,7 +59,7 @@ func TestAnnounceKeyTranslatesProcessingState(t *testing.T) {
 		krypton string
 		want    string
 	}{
-		{"completed maps to ready", kryptonProcessingCompleted, openkcmapi.ProcessingStateReady},
+		{"completed maps to ready", kryptongrpc.KryptonProcessingCompleted, openkcmapi.ProcessingStateReady},
 		{"anything else passes through", "pending", "pending"},
 	}
 	for _, tc := range tests {
@@ -77,15 +80,9 @@ func TestAnnounceKeyTranslatesProcessingState(t *testing.T) {
 			resp, err := c.AnnounceKey(t.Context(), openkcmapi.CreateKeyRequest{Name: "domain-key", Kind: "K1"})
 
 			// then
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if resp.ID != testKeyID {
-				t.Errorf("ID = %q, want %q", resp.ID, testKeyID)
-			}
-			if resp.ProcessingState != tc.want {
-				t.Errorf("ProcessingState = %q, want %q", resp.ProcessingState, tc.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, testKeyID, resp.ID, "ID")
+			assert.Equal(t, tc.want, resp.ProcessingState, "ProcessingState")
 		})
 	}
 }
@@ -97,12 +94,12 @@ func TestGetKeyTranslatesLifecycleState(t *testing.T) {
 		want    shared.LifecycleState
 		wantErr bool
 	}{
-		{"pre-activation", kryptonKeyLifecyclePreActivation, shared.LifecyclePreActive, false},
-		{"active", kryptonKeyLifecycleActive, shared.LifecycleActive, false},
-		{"deactivated", kryptonKeyLifecycleDeactivated, shared.LifecycleDeactivated, false},
-		{"suspended", kryptonKeyLifecycleSuspended, shared.LifecycleSuspended, false},
-		{"compromised", kryptonKeyLifecycleCompromised, shared.LifecycleCompromised, false},
-		{"destroyed", kryptonKeyLifecycleDestroyed, shared.LifecycleDestroyed, false},
+		{"pre-activation", kryptongrpc.KryptonKeyLifecyclePreActivation, shared.LifecyclePreActive, false},
+		{"active", kryptongrpc.KryptonKeyLifecycleActive, shared.LifecycleActive, false},
+		{"deactivated", kryptongrpc.KryptonKeyLifecycleDeactivated, shared.LifecycleDeactivated, false},
+		{"suspended", kryptongrpc.KryptonKeyLifecycleSuspended, shared.LifecycleSuspended, false},
+		{"compromised", kryptongrpc.KryptonKeyLifecycleCompromised, shared.LifecycleCompromised, false},
+		{"destroyed", kryptongrpc.KryptonKeyLifecycleDestroyed, shared.LifecycleDestroyed, false},
 		{"unknown is rejected", "banana", "", true},
 	}
 	for _, tc := range tests {
@@ -115,17 +112,11 @@ func TestGetKeyTranslatesLifecycleState(t *testing.T) {
 
 			// then
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("want an error for unknown lifecycle state %q", tc.krypton)
-				}
+				require.Errorf(t, err, "want an error for unknown lifecycle state %q", tc.krypton)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if resp.LifecycleState != string(tc.want) {
-				t.Errorf("LifecycleState = %q, want %q", resp.LifecycleState, string(tc.want))
-			}
+			require.NoError(t, err)
+			assert.Equal(t, string(tc.want), resp.LifecycleState, "LifecycleState")
 		})
 	}
 }
@@ -138,7 +129,7 @@ func TestActivateKeyReadsBackStateAfterEmptyResponse(t *testing.T) {
 		},
 		getFn: func(*kryptonkeys.GetKeyRequest) (*kryptonkeys.GetKeyResponse, error) {
 			return &kryptonkeys.GetKeyResponse{
-				Key: &kryptonkeys.Key{Id: testKeyID, LifeCycleState: kryptonKeyLifecycleActive},
+				Key: &kryptonkeys.Key{Id: testKeyID, LifeCycleState: kryptongrpc.KryptonKeyLifecycleActive},
 			}, nil
 		},
 	})
@@ -147,10 +138,6 @@ func TestActivateKeyReadsBackStateAfterEmptyResponse(t *testing.T) {
 	resp, err := c.ActivateKey(t.Context(), testKeyID, testKeyTenantID)
 
 	// then
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.LifecycleState != string(shared.LifecycleActive) {
-		t.Errorf("LifecycleState = %q, want %q", resp.LifecycleState, string(shared.LifecycleActive))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, string(shared.LifecycleActive), resp.LifecycleState, "LifecycleState")
 }

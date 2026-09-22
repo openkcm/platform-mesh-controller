@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"context"
@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/openkcm/openkcm-controller/api/shared"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -72,7 +73,7 @@ func (f *fakeBackend) GetTenant(_ context.Context, id string) (*openkcmapi.GetTe
 	if fn != nil {
 		return fn(id)
 	}
-	return &openkcmapi.GetTenantResponse{ID: id, ProcessingState: processingStateReady}, nil
+	return &openkcmapi.GetTenantResponse{ID: id, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
 
 func (f *fakeBackend) DeleteTenant(_ context.Context, id string) error {
@@ -106,10 +107,10 @@ func (f *fakeBackend) CreateKey(
 	f.mu.Lock()
 	f.createKeyCalls = append(f.createKeyCalls, req)
 	f.mu.Unlock()
-	return &openkcmapi.CreateKeyResponse{ID: fakeKeyID, ProcessingState: processingStateReady}, nil
+	return &openkcmapi.CreateKeyResponse{ID: fakeKeyID, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
 func (f *fakeBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
-	return &openkcmapi.GetKeyResponse{ID: id, ProcessingState: processingStateReady}, nil
+	return &openkcmapi.GetKeyResponse{ID: id, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
 func (f *fakeBackend) DeleteKey(_ context.Context, id string) error {
 	f.mu.Lock()
@@ -157,4 +158,4 @@ func (f *fakeBackend) GetDEK(context.Context, string) (*openkcmapi.GetDEKRespons
 }
 func (f *fakeBackend) DeleteDEK(context.Context, string) error { return nil }
 
-var _ Backend = (*fakeBackend)(nil)
+var _ operations.Backend = (*fakeBackend)(nil)

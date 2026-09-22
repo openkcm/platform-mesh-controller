@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"os"
@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 )
 
@@ -42,7 +43,7 @@ import (
 //
 // Without the variable the spec is skipped, so CI stays hermetic.
 var _ = Describe("TenantReconciler against a live Krypton", func() {
-	var reconciler *TenantReconciler
+	var reconciler *operations.TenantReconciler
 
 	BeforeEach(func() {
 		addr := os.Getenv("KRYPTON_TEST_ADDR")
@@ -55,7 +56,7 @@ var _ = Describe("TenantReconciler against a live Krypton", func() {
 		DeferCleanup(func() { _ = conn.Close() })
 
 		ensureLogicalCluster(testWorkspace)
-		reconciler = &TenantReconciler{
+		reconciler = &operations.TenantReconciler{
 			APIClient: kryptongrpc.NewTenantClient(conn),
 			Manager:   newTestManager(),
 		}
@@ -73,13 +74,13 @@ var _ = Describe("TenantReconciler against a live Krypton", func() {
 
 		reloaded := reloadTenant(tenant.Name)
 
-		cond := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
+		cond := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue), "the CR must go Ready once Krypton has the tenant")
 
 		tenantID := reloaded.Status.OperationID
 		Expect(tenantID).NotTo(BeEmpty())
-		Expect(reloaded.Annotations).To(HaveKeyWithValue(tenantIDAnnotation, tenantID))
+		Expect(reloaded.Annotations).To(HaveKeyWithValue(operations.TenantIDAnnotation, tenantID))
 
 		// The id must be Krypton's, not something the controller invented, so
 		// ask Krypton directly rather than trusting the reconciler's status.

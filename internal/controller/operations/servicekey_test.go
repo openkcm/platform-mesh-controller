@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"net"
@@ -26,6 +26,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 	"github.com/openkcm/openkcm-controller/internal/mockapi"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
@@ -36,7 +37,7 @@ var _ = Describe("ServiceKey Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: defaultTenantNamespace,
+			Namespace: testDefaultTenantNamespace,
 		}
 		servicekey := &operationsv1alpha1.ServiceKey{}
 
@@ -46,7 +47,7 @@ var _ = Describe("ServiceKey Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &operationsv1alpha1.ServiceKey{
 					Name:      resourceName,
-					Namespace: defaultTenantNamespace,
+					Namespace: testDefaultTenantNamespace,
 					Spec: operationsv1alpha1.ServiceKeySpec{
 						TenantNameRef: "test-tenant",
 						DomainKeyRef:  "test-domainkey",
@@ -81,7 +82,7 @@ var _ = Describe("ServiceKey Controller", func() {
 			apiClient := openkcmapi.NewClient("http://" + listener.Addr().String())
 
 			By("Reconciling the created resource")
-			controllerReconciler := &ServiceKeyReconciler{
+			controllerReconciler := &operations.ServiceKeyReconciler{
 				APIClient: apiClient,
 			}
 

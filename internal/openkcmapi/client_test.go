@@ -14,12 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package openkcmapi
+package openkcmapi_test
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
 func TestErrorsAreClassifiedByStatus(t *testing.T) {
@@ -48,18 +52,12 @@ func TestErrorsAreClassifiedByStatus(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			// when
-			_, err := NewClient(srv.URL).GetTenant(t.Context(), "tenant-id")
+			_, err := openkcmapi.NewClient(srv.URL).GetTenant(t.Context(), "tenant-id")
 
 			// then
-			if IsNotFound(err) != tc.notFound {
-				t.Errorf("IsNotFound = %v, want %v (%v)", IsNotFound(err), tc.notFound, err)
-			}
-			if IsConflict(err) != tc.conflict {
-				t.Errorf("IsConflict = %v, want %v (%v)", IsConflict(err), tc.conflict, err)
-			}
-			if IsRetryable(err) != tc.retryable {
-				t.Errorf("IsRetryable = %v, want %v (%v)", IsRetryable(err), tc.retryable, err)
-			}
+			assert.Equalf(t, tc.notFound, openkcmapi.IsNotFound(err), "IsNotFound (%v)", err)
+			assert.Equalf(t, tc.conflict, openkcmapi.IsConflict(err), "IsConflict (%v)", err)
+			assert.Equalf(t, tc.retryable, openkcmapi.IsRetryable(err), "IsRetryable (%v)", err)
 		})
 	}
 }
