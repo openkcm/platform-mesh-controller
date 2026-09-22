@@ -150,14 +150,14 @@ func cleanupDomainKeyObject(obj client.Object, name string) {
 
 var _ = Describe("DomainKeyReconciler", func() {
 	var (
-		backend    *fakeBackend
+		backend    *testBackend
 		reconciler *operations.DomainKeyReconciler
 	)
 
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
 		ensureDomainKeyNamespace()
-		backend = &fakeBackend{}
+		backend = &testBackend{}
 		reconciler = &operations.DomainKeyReconciler{
 			APIClient:        backend,
 			Manager:          newTestManager(),
@@ -193,11 +193,11 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(backend.createKeyCalls[0].TenantID).To(Equal(testTenantID),
 			"the key must be created under the tenant the Tenant reconciler registered")
 		Expect(backend.createKeyCalls[0].Kind).To(Equal("L2"))
-		Expect(backend.activateKeyCalls).To(ContainElement(fakeKeyID))
+		Expect(backend.activateKeyCalls).To(ContainElement(testKeyID))
 
 		reloaded := reloadDomainKey(dk.Name)
 		Expect(reloaded.Status.CryptoState).NotTo(BeNil())
-		Expect(reloaded.Status.CryptoState.ID).To(Equal(fakeKeyID))
+		Expect(reloaded.Status.CryptoState.ID).To(Equal(testKeyID))
 		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
 		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 		Expect(ready).NotTo(BeNil())

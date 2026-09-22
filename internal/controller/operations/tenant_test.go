@@ -65,13 +65,13 @@ func tenantGone(string) (*openkcmapi.GetTenantResponse, error) {
 
 var _ = Describe("TenantReconciler", func() {
 	var (
-		backend    *fakeBackend
+		backend    *testBackend
 		reconciler *operations.TenantReconciler
 	)
 
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
-		backend = &fakeBackend{}
+		backend = &testBackend{}
 		reconciler = &operations.TenantReconciler{APIClient: backend, Manager: newTestManager()}
 	})
 

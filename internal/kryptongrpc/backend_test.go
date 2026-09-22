@@ -34,10 +34,10 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-// fakeKeyServer mimics Krypton's KeyService closely enough to exercise the
+// testKeyServer mimics Krypton's KeyService closely enough to exercise the
 // adapter: announce is idempotent on (tenant, name), a fresh key is
 // pre-activation, and activate flips it to active.
-type fakeKeyServer struct {
+type testKeyServer struct {
 	kryptonkeys.UnimplementedKeyServiceServer
 
 	mu           sync.Mutex
@@ -48,14 +48,14 @@ type fakeKeyServer struct {
 	activateSeen []string
 }
 
-func newFakeKeyServer() *fakeKeyServer {
-	return &fakeKeyServer{
+func newTestKeyServer() *testKeyServer {
+	return &testKeyServer{
 		byName: map[string]*kryptonkeys.Key{},
 		byID:   map[string]*kryptonkeys.Key{},
 	}
 }
 
-func (s *fakeKeyServer) AnnounceKey(
+func (s *testKeyServer) AnnounceKey(
 	_ context.Context, req *kryptonkeys.AnnounceKeyRequest,
 ) (*kryptonkeys.AnnounceKeyResponse, error) {
 	s.mu.Lock()
@@ -81,7 +81,7 @@ func (s *fakeKeyServer) AnnounceKey(
 	return &kryptonkeys.AnnounceKeyResponse{Key: key}, nil
 }
 
-func (s *fakeKeyServer) GetKey(
+func (s *testKeyServer) GetKey(
 	_ context.Context, req *kryptonkeys.GetKeyRequest,
 ) (*kryptonkeys.GetKeyResponse, error) {
 	s.mu.Lock()
@@ -94,7 +94,7 @@ func (s *fakeKeyServer) GetKey(
 	return &kryptonkeys.GetKeyResponse{Key: key}, nil
 }
 
-func (s *fakeKeyServer) ActivateKey(
+func (s *testKeyServer) ActivateKey(
 	_ context.Context, req *kryptonkeys.ActivateKeyRequest,
 ) (*kryptonkeys.ActivateKeyResponse, error) {
 	s.mu.Lock()
@@ -107,7 +107,7 @@ func (s *fakeKeyServer) ActivateKey(
 	return &kryptonkeys.ActivateKeyResponse{}, nil
 }
 
-func newBackendAgainst(t *testing.T, srv *fakeKeyServer) *kryptongrpc.Backend {
+func newBackendAgainst(t *testing.T, srv *testKeyServer) *kryptongrpc.Backend {
 	conn := bufconnDial(t, func(s *grpc.Server) {
 		kryptonkeys.RegisterKeyServiceServer(s, srv)
 	})
@@ -116,7 +116,7 @@ func newBackendAgainst(t *testing.T, srv *fakeKeyServer) *kryptongrpc.Backend {
 
 func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 	// given
-	srv := newFakeKeyServer()
+	srv := newTestKeyServer()
 	b := newBackendAgainst(t, srv)
 
 	// when
@@ -139,7 +139,7 @@ func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 
 func TestBackendReusesRootAcrossKeys(t *testing.T) {
 	// given a backend that already made one key
-	srv := newFakeKeyServer()
+	srv := newTestKeyServer()
 	b := newBackendAgainst(t, srv)
 	_, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L2", Name: "a"})
 	require.NoError(t, err, "first CreateKey")
@@ -161,7 +161,7 @@ func TestBackendReusesRootAcrossKeys(t *testing.T) {
 
 func TestBackendGetAndActivateUnpackTenant(t *testing.T) {
 	// given a created key
-	srv := newFakeKeyServer()
+	srv := newTestKeyServer()
 	b := newBackendAgainst(t, srv)
 	created, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "tid", Kind: "L2", Name: "k"})
 	require.NoError(t, err, "CreateKey")
@@ -176,19 +176,19 @@ func TestBackendGetAndActivateUnpackTenant(t *testing.T) {
 }
 
 func TestBackendRejectsUnknownLevel(t *testing.T) {
-	b := newBackendAgainst(t, newFakeKeyServer())
+	b := newBackendAgainst(t, newTestKeyServer())
 	_, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "t", Kind: "L9", Name: "x"})
 	require.Error(t, err, "an unconfigured level must be rejected")
 }
 
 func TestBackendRejectsMalformedID(t *testing.T) {
-	b := newBackendAgainst(t, newFakeKeyServer())
+	b := newBackendAgainst(t, newTestKeyServer())
 	_, err := b.GetKey(t.Context(), "no-separator")
 	require.Error(t, err, "a key id without a tenant must be rejected")
 }
 
 func TestBackendKeyOpsUnsupportedByKrypton(t *testing.T) {
-	b := newBackendAgainst(t, newFakeKeyServer())
+	b := newBackendAgainst(t, newTestKeyServer())
 	_, err := b.DeactivateKey(t.Context(), "t/k")
 	assert.ErrorIs(t, err, errors.ErrUnsupported, "DeactivateKey error")
 	assert.ErrorIs(t, b.DeleteKey(t.Context(), "t/k"), errors.ErrUnsupported, "DeleteKey error")

@@ -26,10 +26,10 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-// fakeBackend is a hand-written Backend used by the reconciler tests. It
+// testBackend is a hand-written Backend used by the reconciler tests. It
 // records what it was asked to do and lets a test decide what each call
 // returns, which is what makes error paths reachable at all.
-type fakeBackend struct {
+type testBackend struct {
 	mu sync.Mutex
 
 	createTenantCalls []string
@@ -48,10 +48,10 @@ type fakeBackend struct {
 	deleteTenantFn func(string) error
 }
 
-// fakeKeyID is what the fake hands back for a created key.
-const fakeKeyID = "domain-key-uuid"
+// testKeyID is what the test backend hands back for a created key.
+const testKeyID = "domain-key-uuid"
 
-func (f *fakeBackend) CreateTenant(
+func (f *testBackend) CreateTenant(
 	_ context.Context,
 	req openkcmapi.CreateTenantRequest,
 ) (*openkcmapi.CreateTenantResponse, error) {
@@ -65,7 +65,7 @@ func (f *fakeBackend) CreateTenant(
 	return &openkcmapi.CreateTenantResponse{ID: testTenantID, ProcessingState: "processing"}, nil
 }
 
-func (f *fakeBackend) GetTenant(_ context.Context, id string) (*openkcmapi.GetTenantResponse, error) {
+func (f *testBackend) GetTenant(_ context.Context, id string) (*openkcmapi.GetTenantResponse, error) {
 	f.mu.Lock()
 	f.getTenantCalls = append(f.getTenantCalls, id)
 	fn := f.getTenantFn
@@ -76,7 +76,7 @@ func (f *fakeBackend) GetTenant(_ context.Context, id string) (*openkcmapi.GetTe
 	return &openkcmapi.GetTenantResponse{ID: id, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
 
-func (f *fakeBackend) DeleteTenant(_ context.Context, id string) error {
+func (f *testBackend) DeleteTenant(_ context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteTenantCalls = append(f.deleteTenantCalls, id)
 	fn := f.deleteTenantFn
@@ -91,28 +91,24 @@ func (f *fakeBackend) DeleteTenant(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeBackend) counts() (create, get, del int) {
+func (f *testBackend) counts() (create, get, del int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.createTenantCalls), len(f.getTenantCalls), len(f.deleteTenantCalls)
 }
 
-// The key operations are unused by the Tenant tests; they exist so fakeBackend
-// satisfies Backend. Extend them when the key reconcilers get the same
-// treatment.
-
-func (f *fakeBackend) CreateKey(
+func (f *testBackend) CreateKey(
 	_ context.Context, req openkcmapi.CreateKeyRequest,
 ) (*openkcmapi.CreateKeyResponse, error) {
 	f.mu.Lock()
 	f.createKeyCalls = append(f.createKeyCalls, req)
 	f.mu.Unlock()
-	return &openkcmapi.CreateKeyResponse{ID: fakeKeyID, ProcessingState: openkcmapi.ProcessingStateReady}, nil
+	return &openkcmapi.CreateKeyResponse{ID: testKeyID, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
-func (f *fakeBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
+func (f *testBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
 	return &openkcmapi.GetKeyResponse{ID: id, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
-func (f *fakeBackend) DeleteKey(_ context.Context, id string) error {
+func (f *testBackend) DeleteKey(_ context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteKeyCalls = append(f.deleteKeyCalls, id)
 	noDelete := f.noDelete
@@ -122,7 +118,7 @@ func (f *fakeBackend) DeleteKey(_ context.Context, id string) error {
 	}
 	return nil
 }
-func (f *fakeBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+func (f *testBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
 	f.mu.Lock()
 	f.activateKeyCalls = append(f.activateKeyCalls, id)
 	f.mu.Unlock()
@@ -132,30 +128,30 @@ func (f *fakeBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.Act
 		Version:        1,
 	}, nil
 }
-func (f *fakeBackend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+func (f *testBackend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
 	return &openkcmapi.ActivateKeyResponse{
 		ID:             id,
 		LifecycleState: string(shared.LifecycleDeactivated),
 		Version:        1,
 	}, nil
 }
-func (f *fakeBackend) CreateRootKey(
+func (f *testBackend) CreateRootKey(
 	context.Context, openkcmapi.CreateRootKeyRequest,
 ) (*openkcmapi.CreateRootKeyResponse, error) {
 	return &openkcmapi.CreateRootKeyResponse{}, nil
 }
-func (f *fakeBackend) GetRootKey(context.Context, string) (*openkcmapi.GetRootKeyResponse, error) {
+func (f *testBackend) GetRootKey(context.Context, string) (*openkcmapi.GetRootKeyResponse, error) {
 	return &openkcmapi.GetRootKeyResponse{}, nil
 }
-func (f *fakeBackend) DeleteRootKey(context.Context, string) error { return nil }
-func (f *fakeBackend) CreateDEK(
+func (f *testBackend) DeleteRootKey(context.Context, string) error { return nil }
+func (f *testBackend) CreateDEK(
 	context.Context, openkcmapi.CreateDEKRequest,
 ) (*openkcmapi.CreateDEKResponse, error) {
 	return &openkcmapi.CreateDEKResponse{}, nil
 }
-func (f *fakeBackend) GetDEK(context.Context, string) (*openkcmapi.GetDEKResponse, error) {
+func (f *testBackend) GetDEK(context.Context, string) (*openkcmapi.GetDEKResponse, error) {
 	return &openkcmapi.GetDEKResponse{}, nil
 }
-func (f *fakeBackend) DeleteDEK(context.Context, string) error { return nil }
+func (f *testBackend) DeleteDEK(context.Context, string) error { return nil }
 
-var _ operations.Backend = (*fakeBackend)(nil)
+var _ operations.Backend = (*testBackend)(nil)

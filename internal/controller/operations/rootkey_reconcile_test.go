@@ -40,7 +40,7 @@ const rootKeyReconciliationNamespace = "rootkey-reconciliation-specs"
 // provisioningBackend records key-provisioning calls while inheriting the
 // tenant call recording used by the existing reconciler test backend.
 type provisioningBackend struct {
-	fakeBackend
+	testBackend
 	rootKeyRequests []openkcmapi.CreateRootKeyRequest
 	dekRequests     []openkcmapi.CreateDEKRequest
 }

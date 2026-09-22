@@ -96,7 +96,7 @@ var _ = Describe("key-chain cascade", func() {
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
 		ensureCascadeNamespace()
-		backend = &fakeBackend{}
+		backend = &testBackend{}
 	})
 
 	AfterEach(cleanupCascadeNamespace)

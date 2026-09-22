@@ -32,7 +32,7 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 )
 
-// The fake-backend specs cover the reconcile logic, and the kryptongrpc specs
+// The testBackend specs cover the reconcile logic, and the kryptongrpc specs
 // cover the wire protocol. Neither exercises the seam between them, so this one
 // drives the real reconciler against a real Krypton over a real API server.
 //
