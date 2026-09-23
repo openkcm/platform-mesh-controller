@@ -31,7 +31,7 @@ import (
 // keyIDSeparator joins the tenant and key id; both are UUIDs, so it never collides.
 const keyIDSeparator = "/"
 
-// Backend adapts Krypton to the key operations the DomainKey reconciler drives.
+// Backend adapts Krypton to the key operations the DomainKey and ServiceKey reconcilers drive.
 type Backend struct {
 	keys *KeyClient
 
@@ -48,12 +48,12 @@ type BackendOptions struct {
 	RootName string
 }
 
-// NewBackend wraps an established gRPC connection. Empty options fall back to
-// the kinds Krypton ships in examples/root.config.yaml.
+// NewBackend wraps an established gRPC connection. Empty options expect Krypton's
+// root segment to serve K1 and K2 as KEKs, without agents.
 func NewBackend(conn grpc.ClientConnInterface, opts BackendOptions) *Backend {
 	kindMap := opts.KindMap
 	if len(kindMap) == 0 {
-		kindMap = map[string]string{"L2": "K1"}
+		kindMap = map[string]string{"L2": "K1", "L3": "K2"}
 	}
 	rootKind := opts.RootKind
 	if rootKind == "" {
@@ -71,8 +71,8 @@ func NewBackend(conn grpc.ClientConnInterface, opts BackendOptions) *Backend {
 	}
 }
 
-// CreateKey seeds the tenant root, announces the key under it, and returns an
-// opaque id carrying the tenant so later reads need no tenant of their own.
+// CreateKey announces the key under its parent, or under the tenant root for a
+// top-level key, and returns an opaque id carrying the tenant.
 func (b *Backend) CreateKey(
 	ctx context.Context, req openkcmapi.CreateKeyRequest,
 ) (*openkcmapi.CreateKeyResponse, error) {
@@ -81,7 +81,7 @@ func (b *Backend) CreateKey(
 		return nil, fmt.Errorf("no krypton kind configured for level %q", req.Kind)
 	}
 
-	rootID, err := b.ensureRoot(ctx, req.TenantID)
+	parentKeyID, err := b.parentKeyID(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (b *Backend) CreateKey(
 		TenantID: req.TenantID,
 		Kind:     kind,
 		Name:     req.Name,
-		ParentID: rootID,
+		ParentID: parentKeyID,
 	})
 	if err != nil {
 		return nil, err
@@ -99,6 +99,20 @@ func (b *Backend) CreateKey(
 		ID:              packKeyID(req.TenantID, child.ID),
 		ProcessingState: child.ProcessingState,
 	}, nil
+}
+
+func (b *Backend) parentKeyID(ctx context.Context, req openkcmapi.CreateKeyRequest) (string, error) {
+	if req.ParentID == "" {
+		return b.ensureRoot(ctx, req.TenantID)
+	}
+	tenantID, keyID, err := unpackKeyID(req.ParentID)
+	if err != nil {
+		return "", err
+	}
+	if tenantID != req.TenantID {
+		return "", fmt.Errorf("parent key %q belongs to another tenant than %q", req.ParentID, req.TenantID)
+	}
+	return keyID, nil
 }
 
 func (b *Backend) GetKey(ctx context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
