@@ -48,4 +48,5 @@ var (
 	ResolvePrimaryRootKey              = (*DomainKeyReconciler).resolvePrimaryRootKey
 	ResolveTenantID                    = resolveTenantID
 	RootKeyResolutionFailureResult     = rootKeyResolutionFailureResult
+	ServiceKeyOpenKCMName              = serviceKeyOpenKCMName
 )

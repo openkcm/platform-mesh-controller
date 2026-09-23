@@ -18,6 +18,7 @@ package operations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -40,7 +41,8 @@ import (
 const (
 	serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
 	// A service key sits one tier below the domain key it hangs off.
-	serviceKeyKind = "L3"
+	serviceKeyKind       = "L3"
+	serviceKeyNamePrefix = "servicekey:"
 )
 
 // ServiceKeyReconciler reconciles a ServiceKey object across KCP workspaces.
@@ -51,7 +53,7 @@ const (
 // (PreActive|Active|Suspended|Deactivated|Compromised|Destroyed) back into
 // status as OpenKCM transitions it.
 type ServiceKeyReconciler struct {
-	APIClient        Backend
+	APIClient        KeyBackend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
@@ -133,7 +135,7 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	// Step 2: key exists — drive to Active. Lifecycle is owned by OpenKCM;
-	// reflect whatever the mock API reports and trigger activation while
+	// reflect whatever the backend reports and trigger activation while
 	// the state is PreActive.
 	keyID := sk.Status.CryptoState.ID
 	keyResp, err := r.APIClient.GetKey(ctx, keyID)
@@ -148,7 +150,7 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		sk.Status.CryptoState.LifecycleState = shared.LifecycleState(keyResp.LifecycleState)
 	}
 
-	if sk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
+	if sk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive && desired == shared.LifecycleActive {
 		activateResp, err := r.APIClient.ActivateKey(ctx, keyID)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -165,6 +167,8 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			InternalKeyID:      keyID,
 			LastTransitionTime: &now,
 		}
+	}
+	if sk.Status.CryptoState.LifecycleState == shared.LifecycleActive {
 		r.setReady(sk, reasonKeyMaterialBound, "ServiceKey is at lifecycle "+string(sk.Status.CryptoState.LifecycleState))
 	}
 
@@ -225,7 +229,7 @@ func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.C
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenantID,
 		Kind:     serviceKeyKind,
-		Name:     sk.Name,
+		Name:     serviceKeyOpenKCMName(sk),
 		ParentID: dk.Status.CryptoState.ID,
 	})
 	if err != nil {
@@ -258,6 +262,10 @@ func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.C
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
+func serviceKeyOpenKCMName(sk *operationsv1alpha1.ServiceKey) string {
+	return serviceKeyNamePrefix + sk.Namespace + "." + sk.Name
 }
 
 func (r *ServiceKeyReconciler) ensureParentDomainKeyLink(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey) (bool, ctrl.Result, error) {
@@ -319,11 +327,17 @@ func (r *ServiceKeyReconciler) handleDeletion(ctx context.Context, cl client.Cli
 	}
 
 	if sk.Status.CryptoState != nil && sk.Status.CryptoState.ID != "" {
-		if err := r.APIClient.DeleteKey(ctx, sk.Status.CryptoState.ID); err != nil {
+		err := r.APIClient.DeleteKey(ctx, sk.Status.CryptoState.ID)
+		switch {
+		case errors.Is(err, errors.ErrUnsupported):
+			// TODO: Krypton has no DeleteKey RPC yet, so we skip upstream cleanup and just drop the finalizer.
+			logger.Info("Backend cannot delete keys; skipping upstream cleanup", "keyID", sk.Status.CryptoState.ID)
+		case err != nil:
 			logger.Error(err, "Failed to delete ServiceKey in OpenKCM; will retry", "keyID", sk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
+		default:
+			logger.Info("ServiceKey deleted from OpenKCM", "keyID", sk.Status.CryptoState.ID)
 		}
-		logger.Info("ServiceKey deleted from OpenKCM", "keyID", sk.Status.CryptoState.ID)
 	}
 
 	controllerutil.RemoveFinalizer(sk, serviceKeyFinalizer)

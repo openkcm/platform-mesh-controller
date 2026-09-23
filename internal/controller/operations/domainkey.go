@@ -48,7 +48,7 @@ const (
 
 // DomainKeyReconciler reconciles a DomainKey object across KCP workspaces.
 type DomainKeyReconciler struct {
-	APIClient        DomainKeyBackend
+	APIClient        KeyBackend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
