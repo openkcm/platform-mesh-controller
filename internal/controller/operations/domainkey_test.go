@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
@@ -125,10 +126,10 @@ func reloadDomainKey(name string) *operationsv1alpha1.DomainKey {
 	return dk
 }
 
-func drive(reconciler *operations.DomainKeyReconciler, dk *operationsv1alpha1.DomainKey, passes int) {
+func drive(reconciler mcreconcile.Reconciler, obj client.Object, passes int) {
 	GinkgoHelper()
 	for range passes {
-		_, err := reconciler.Reconcile(ctx, requestFor(dk))
+		_, err := reconciler.Reconcile(ctx, requestFor(obj))
 		Expect(err).NotTo(HaveOccurred())
 	}
 }
