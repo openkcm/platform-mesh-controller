@@ -18,6 +18,7 @@ package operations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,12 +38,15 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const dataEncryptionKeyFinalizer = "operations.openkcm.io/dataencryptionkey-cleanup"
+const (
+	dataEncryptionKeyFinalizer  = "operations.openkcm.io/dataencryptionkey-cleanup"
+	dataEncryptionKeyNamePrefix = "dataencryptionkey:"
+)
 
 // DataEncryptionKeyReconciler reconciles a DataEncryptionKey (L4). Requires
 // the parent ServiceKey to be at lifecycleState=Active before provisioning.
 type DataEncryptionKeyReconciler struct {
-	APIClient        Backend
+	APIClient        DataEncryptionKeyBackend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
@@ -128,8 +132,11 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 	if resp.ProcessingState != processingStateReady {
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
+	if resp.LifecycleState != "" {
+		dek.Status.CryptoState.LifecycleState = shared.LifecycleState(resp.LifecycleState)
+	}
 
-	if dek.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
+	if dek.Status.CryptoState.LifecycleState == shared.LifecyclePreActive && desired == shared.LifecycleActive {
 		activateResp, err := r.APIClient.ActivateKey(ctx, dek.Status.CryptoState.ID)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -141,21 +148,6 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 		dek.Status.CryptoState.LastRotatedAt = &now
 		dek.Status.ReconciliationStatus.LastTransitionTime = &now
 		dek.Status.ReconciliationStatus.Message = "Data Encryption Key generated natively."
-
-		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-			Type:               readyType,
-			Status:             metav1.ConditionTrue,
-			Reason:             reasonKeyMaterialBound,
-			Message:            "DataEncryptionKey activated",
-			ObservedGeneration: dek.Generation,
-		})
-		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-			Type:               providerSyncedType,
-			Status:             metav1.ConditionTrue,
-			Reason:             reasonSyncSuccessful,
-			Message:            "Metadata fully replicated.",
-			ObservedGeneration: dek.Generation,
-		})
 	}
 
 	// Lifecycle reconcile (Active ⇄ Deactivated). DEK has no downstream
@@ -173,23 +165,31 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 		now := metav1.Now()
 		dek.Status.CryptoState.LifecycleState = newState
 		dek.Status.CryptoState.LastRotatedAt = &now
-		if newState == shared.LifecycleDeactivated {
-			meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-				Type:               readyType,
-				Status:             metav1.ConditionFalse,
-				Reason:             reasonDeactivated,
-				Message:            "DEK deactivated per spec.lifecycle.",
-				ObservedGeneration: dek.Generation,
-			})
-		} else {
-			meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
-				Type:               readyType,
-				Status:             metav1.ConditionTrue,
-				Reason:             reasonKeyMaterialBound,
-				Message:            "DEK re-activated.",
-				ObservedGeneration: dek.Generation,
-			})
-		}
+	}
+	switch dek.Status.CryptoState.LifecycleState {
+	case shared.LifecycleActive:
+		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
+			Type:               readyType,
+			Status:             metav1.ConditionTrue,
+			Reason:             reasonKeyMaterialBound,
+			Message:            "DataEncryptionKey activated",
+			ObservedGeneration: dek.Generation,
+		})
+		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
+			Type:               providerSyncedType,
+			Status:             metav1.ConditionTrue,
+			Reason:             reasonSyncSuccessful,
+			Message:            "Metadata fully replicated.",
+			ObservedGeneration: dek.Generation,
+		})
+	case shared.LifecycleDeactivated:
+		meta.SetStatusCondition(&dek.Status.Conditions, metav1.Condition{
+			Type:               readyType,
+			Status:             metav1.ConditionFalse,
+			Reason:             reasonDeactivated,
+			Message:            "DEK deactivated per spec.lifecycle.",
+			ObservedGeneration: dek.Generation,
+		})
 	}
 	dek.Status.ObservedGeneration = dek.Generation
 	if err := cl.Status().Update(ctx, dek); err != nil {
@@ -226,7 +226,7 @@ func (r *DataEncryptionKeyReconciler) createDataEncryptionKey(
 	resp, err := r.APIClient.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
 		TenantID:       tenantID,
 		ServiceKeyID:   sk.Status.CryptoState.ID,
-		Name:           dek.Name,
+		Name:           dataEncryptionKeyOpenKCMName(dek),
 		KMIPAttributes: attrs,
 	})
 	if err != nil {
@@ -258,6 +258,10 @@ func (r *DataEncryptionKeyReconciler) createDataEncryptionKey(
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
+func dataEncryptionKeyOpenKCMName(dek *operationsv1alpha1.DataEncryptionKey) string {
+	return dataEncryptionKeyNamePrefix + dek.Namespace + "." + dek.Name
 }
 
 func (r *DataEncryptionKeyReconciler) ensureParentServiceKeyLink(ctx context.Context, cl client.Client, dek *operationsv1alpha1.DataEncryptionKey) (bool, ctrl.Result, error) {
@@ -300,7 +304,12 @@ func (r *DataEncryptionKeyReconciler) handleDeletion(ctx context.Context, cl cli
 		return ctrl.Result{}, nil
 	}
 	if dek.Status.CryptoState != nil && dek.Status.CryptoState.ID != "" {
-		if err := r.APIClient.DeleteDEK(ctx, dek.Status.CryptoState.ID); err != nil {
+		err := r.APIClient.DeleteDEK(ctx, dek.Status.CryptoState.ID)
+		switch {
+		case errors.Is(err, errors.ErrUnsupported):
+			// TODO: Krypton has no DeleteKey RPC yet, so we skip upstream cleanup and just drop the finalizer.
+			logger.Info("Backend cannot delete keys; skipping upstream cleanup", "dekID", dek.Status.CryptoState.ID)
+		case err != nil:
 			logger.Error(err, "Failed to delete DEK in OpenKCM; will retry", "dekID", dek.Status.CryptoState.ID)
 			return ctrl.Result{}, err
 		}
