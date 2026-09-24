@@ -31,7 +31,9 @@ import (
 // keyIDSeparator joins the tenant and key id; both are UUIDs, so it never collides.
 const keyIDSeparator = "/"
 
-// Backend adapts Krypton to the key operations the DomainKey and ServiceKey reconcilers drive.
+const dataEncryptionKeyLevel = "L4"
+
+// Backend adapts Krypton to the key operations the DomainKey, ServiceKey and DataEncryptionKey reconcilers drive.
 type Backend struct {
 	keys *KeyClient
 
@@ -49,11 +51,11 @@ type BackendOptions struct {
 }
 
 // NewBackend wraps an established gRPC connection. Empty options expect Krypton's
-// root segment to serve K1 and K2 as KEKs, without agents.
+// root segment to serve K1 and K2 as KEKs and K3 as DEKs, without agents.
 func NewBackend(conn grpc.ClientConnInterface, opts BackendOptions) *Backend {
 	kindMap := opts.KindMap
 	if len(kindMap) == 0 {
-		kindMap = map[string]string{"L2": "K1", "L3": "K2"}
+		kindMap = map[string]string{"L2": "K1", "L3": "K2", dataEncryptionKeyLevel: "K3"}
 	}
 	rootKind := opts.RootKind
 	if rootKind == "" {
@@ -149,6 +151,38 @@ func (b *Backend) DeactivateKey(_ context.Context, id string) (*openkcmapi.Activ
 // DeleteKey is not offered by Krypton.
 func (b *Backend) DeleteKey(_ context.Context, id string) error {
 	return fmt.Errorf("DeleteKey %s: %w", id, errors.ErrUnsupported)
+}
+
+func (b *Backend) CreateDEK(
+	ctx context.Context, req openkcmapi.CreateDEKRequest,
+) (*openkcmapi.CreateDEKResponse, error) {
+	// TODO: KMIP attributes have no agreed place in Krypton yet, so they are not sent.
+	created, err := b.CreateKey(ctx, openkcmapi.CreateKeyRequest{
+		TenantID: req.TenantID,
+		Kind:     dataEncryptionKeyLevel,
+		Name:     req.Name,
+		ParentID: req.ServiceKeyID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &openkcmapi.CreateDEKResponse{ID: created.ID, ProcessingState: created.ProcessingState}, nil
+}
+
+func (b *Backend) GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResponse, error) {
+	key, err := b.GetKey(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &openkcmapi.GetDEKResponse{
+		ID:              key.ID,
+		ProcessingState: key.ProcessingState,
+		LifecycleState:  key.LifecycleState,
+	}, nil
+}
+
+func (b *Backend) DeleteDEK(_ context.Context, id string) error {
+	return fmt.Errorf("DeleteDEK %s: %w", id, errors.ErrUnsupported)
 }
 
 // ensureRoot returns the tenant's active root, announcing and activating the

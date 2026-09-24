@@ -121,7 +121,7 @@ func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 
 	// when
 	resp, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
-		TenantID: "tenant-1", Kind: "L2", Name: "acme.domain",
+		TenantID: "tenant-1", Kind: "L2", Name: testDomainKeyName,
 	})
 
 	// then
@@ -137,14 +137,17 @@ func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 	assert.Equal(t, []string{"key-1"}, srv.activateSeen, "activated, want only the root key-1")
 }
 
-const testServiceKeyName = "acme.service"
+const (
+	testDomainKeyName  = "acme.domain"
+	testServiceKeyName = "acme.service"
+)
 
 func TestBackendCreateKeyUnderParent(t *testing.T) {
 	// given
 	srv := newTestKeyServer()
 	b := newBackendAgainst(t, srv)
 	domain, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
-		TenantID: testKeyTenantID, Kind: "L2", Name: "acme.domain",
+		TenantID: testKeyTenantID, Kind: "L2", Name: testDomainKeyName,
 	})
 	require.NoError(t, err, "CreateKey domain key")
 
@@ -159,6 +162,36 @@ func TestBackendCreateKeyUnderParent(t *testing.T) {
 	require.Len(t, srv.announceLog, 3, "announced keys, want root, domain and service")
 	assert.Equal(t, "K2", srv.announceLog[2].GetKind(), "service key kind")
 	assert.Equal(t, "key-2", srv.announceLog[2].GetParentId(), "service key parent")
+}
+
+func TestBackendCreateDEKUnderServiceKey(t *testing.T) {
+	// given
+	srv := newTestKeyServer()
+	b := newBackendAgainst(t, srv)
+	domain, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
+		TenantID: testKeyTenantID, Kind: "L2", Name: testDomainKeyName,
+	})
+	require.NoError(t, err, "CreateKey domain key")
+	service, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
+		TenantID: testKeyTenantID, Kind: "L3", Name: testServiceKeyName, ParentID: domain.ID,
+	})
+	require.NoError(t, err, "CreateKey service key")
+
+	// when
+	dek, err := b.CreateDEK(t.Context(), openkcmapi.CreateDEKRequest{
+		TenantID: testKeyTenantID, ServiceKeyID: service.ID, Name: "acme.dek",
+	})
+
+	// then
+	require.NoError(t, err, "CreateDEK")
+	assert.Equal(t, testKeyTenantID+"/key-4", dek.ID, "packed id")
+	require.Len(t, srv.announceLog, 4, "announced keys, want root, domain, service and data encryption key")
+	assert.Equal(t, "K3", srv.announceLog[3].GetKind(), "data encryption key kind")
+	assert.Equal(t, "key-3", srv.announceLog[3].GetParentId(), "data encryption key parent")
+	got, err := b.GetDEK(t.Context(), dek.ID)
+	require.NoError(t, err, "GetDEK")
+	assert.Equal(t, dek.ID, got.ID, "GetDEK id")
+	assert.Equal(t, string(shared.LifecyclePreActive), got.LifecycleState, "GetDEK lifecycle")
 }
 
 func TestBackendRejectsMalformedParent(t *testing.T) {
@@ -246,4 +279,5 @@ func TestBackendKeyOpsUnsupportedByKrypton(t *testing.T) {
 	_, err := b.DeactivateKey(t.Context(), "t/k")
 	assert.ErrorIs(t, err, errors.ErrUnsupported, "DeactivateKey error")
 	assert.ErrorIs(t, b.DeleteKey(t.Context(), "t/k"), errors.ErrUnsupported, "DeleteKey error")
+	assert.ErrorIs(t, b.DeleteDEK(t.Context(), "t/k"), errors.ErrUnsupported, "DeleteDEK error")
 }

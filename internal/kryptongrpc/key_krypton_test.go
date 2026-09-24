@@ -150,4 +150,23 @@ func TestBackendAgainstLiveKrypton(t *testing.T) {
 	act, err = b.ActivateKey(ctx, service.ID)
 	require.NoError(t, err, "ActivateKey service key")
 	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated service key lifecycle")
+
+	// when a data encryption key is created under the service key
+	dek, err := b.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
+		TenantID: tenant.ID, ServiceKeyID: service.ID, Name: "dek-" + tag,
+	})
+	require.NoError(t, err, "CreateDEK")
+
+	// then it lands under the service key as K3 and activates
+	_, dataEncryptionKeyID, err := kryptongrpc.UnpackKeyID(dek.ID)
+	require.NoError(t, err, "returned data encryption key id is not a packed handle")
+	stored, err = kryptonkeys.NewKeyServiceClient(conn).GetKey(ctx, &kryptonkeys.GetKeyRequest{
+		Id: dataEncryptionKeyID, TenantId: tenant.ID,
+	})
+	require.NoError(t, err, "GetKey data encryption key from Krypton")
+	assert.Equal(t, "K3", stored.GetKey().GetKind(), "data encryption key kind")
+	assert.Equal(t, serviceKeyID, stored.GetKey().GetParentId(), "data encryption key parent")
+	act, err = b.ActivateKey(ctx, dek.ID)
+	require.NoError(t, err, "ActivateKey data encryption key")
+	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated data encryption key lifecycle")
 }
