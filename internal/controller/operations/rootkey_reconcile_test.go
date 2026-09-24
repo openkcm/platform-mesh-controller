@@ -35,7 +35,10 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const rootKeyReconciliationNamespace = "rootkey-reconciliation-specs"
+const (
+	rootKeyReconciliationNamespace = "rootkey-reconciliation-specs"
+	provisionedDataEncryptionKeyID = "data-encryption-key-id"
+)
 
 // provisioningBackend records key-provisioning calls while inheriting the
 // tenant call recording used by the existing reconciler test backend.
@@ -63,7 +66,7 @@ func (b *provisioningBackend) CreateDEK(
 	b.dekRequests = append(b.dekRequests, req)
 	b.mu.Unlock()
 	return &openkcmapi.CreateDEKResponse{
-		ID:              "data-encryption-key-id",
+		ID:              provisionedDataEncryptionKeyID,
 		ProcessingState: openkcmapi.ProcessingStateReady,
 	}, nil
 }

@@ -17,8 +17,12 @@ limitations under the License.
 package operations_test
 
 import (
+	"errors"
+	"testing"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -91,6 +95,14 @@ func newDataEncryptionKeyForReconciliation() *operationsv1alpha1.DataEncryptionK
 	return dataEncryptionKey
 }
 
+func reloadDataEncryptionKey(dek *operationsv1alpha1.DataEncryptionKey) *operationsv1alpha1.DataEncryptionKey {
+	GinkgoHelper()
+
+	reloaded := &operationsv1alpha1.DataEncryptionKey{}
+	Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(dek), reloaded)).To(Succeed())
+	return reloaded
+}
+
 func cleanupDataEncryptionKeyReconciliationObject(obj client.Object) {
 	GinkgoHelper()
 
@@ -100,7 +112,7 @@ func cleanupDataEncryptionKeyReconciliationObject(obj client.Object) {
 	}
 	stored.SetFinalizers(nil)
 	Expect(k8sClient.Update(ctx, stored)).To(Succeed())
-	Expect(k8sClient.Delete(ctx, stored)).To(Succeed())
+	Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, stored))).To(Succeed())
 }
 
 var _ = Describe("DataEncryptionKeyReconciler", func() {
@@ -147,6 +159,7 @@ var _ = Describe("DataEncryptionKeyReconciler", func() {
 
 		Expect(backend.dekRequests).To(HaveLen(1))
 		Expect(backend.dekRequests[0].TenantID).To(Equal(testTenantID))
+		Expect(backend.dekRequests[0].Name).To(Equal(operations.DataEncryptionKeyOpenKCMName(dataEncryptionKey)))
 		Expect(backend.dekRequests[0].ServiceKeyID).To(Equal("service-key-id"))
 		Expect(backend.dekRequests[0].KMIPAttributes).To(Equal(map[string]string{"purpose": "database"}))
 		createTenantCalls, _, _ := backend.counts()
@@ -173,4 +186,156 @@ var _ = Describe("DataEncryptionKeyReconciler", func() {
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Reason).To(Equal("AwaitingTenant"))
 	})
+
+	It("activates the key once the backend has it ready", func() {
+		// given
+		newDataEncryptionKeyReconciliationTenant(true)
+		newActiveServiceKeyForDataEncryptionKeyReconciliation()
+		dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+
+		// when
+		drive(reconciler, dataEncryptionKey, 4)
+
+		// then
+		Expect(backend.activateKeyCalls).To(ConsistOf(provisionedDataEncryptionKeyID))
+		reloaded := reloadDataEncryptionKey(dataEncryptionKey)
+		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
+		Expect(meta.IsStatusConditionTrue(reloaded.Status.Conditions, operations.ReadyType)).To(BeTrue())
+	})
+
+	It("reports ready when the backend already holds the key active", func() {
+		// given
+		newDataEncryptionKeyReconciliationTenant(true)
+		newActiveServiceKeyForDataEncryptionKeyReconciliation()
+		dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+		backend.keyLifecycle = shared.LifecycleActive
+
+		// when
+		drive(reconciler, dataEncryptionKey, 4)
+
+		// then
+		Expect(backend.activateKeyCalls).To(BeEmpty())
+		reloaded := reloadDataEncryptionKey(dataEncryptionKey)
+		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
+		Expect(meta.IsStatusConditionTrue(reloaded.Status.Conditions, operations.ReadyType)).To(BeTrue())
+	})
+
+	It("keeps the key pre-active while it should be deactivated", func() {
+		// given
+		newDataEncryptionKeyReconciliationTenant(true)
+		newActiveServiceKeyForDataEncryptionKeyReconciliation()
+		dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+		dataEncryptionKey.Spec.Lifecycle = shared.DesiredLifecycleDeactivated
+		Expect(k8sClient.Update(ctx, dataEncryptionKey)).To(Succeed())
+
+		// when
+		drive(reconciler, dataEncryptionKey, 4)
+
+		// then
+		Expect(backend.activateKeyCalls).To(BeEmpty())
+		reloaded := reloadDataEncryptionKey(dataEncryptionKey)
+		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecyclePreActive))
+	})
+
+	It("reports a key the backend already deactivated as not ready", func() {
+		// given
+		newDataEncryptionKeyReconciliationTenant(true)
+		newActiveServiceKeyForDataEncryptionKeyReconciliation()
+		dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+		drive(reconciler, dataEncryptionKey, 3)
+		backend.keyLifecycle = shared.LifecycleDeactivated
+		deactivated := reloadDataEncryptionKey(dataEncryptionKey)
+		deactivated.Spec.Lifecycle = shared.DesiredLifecycleDeactivated
+		Expect(k8sClient.Update(ctx, deactivated)).To(Succeed())
+
+		// when
+		drive(reconciler, dataEncryptionKey, 1)
+
+		// then
+		reloaded := reloadDataEncryptionKey(dataEncryptionKey)
+		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleDeactivated))
+		Expect(meta.IsStatusConditionTrue(reloaded.Status.Conditions, operations.ReadyType)).To(BeFalse())
+	})
+
+	It("reports the failure when the backend cannot deactivate the key", func() {
+		// given
+		newDataEncryptionKeyReconciliationTenant(true)
+		newActiveServiceKeyForDataEncryptionKeyReconciliation()
+		dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+		drive(reconciler, dataEncryptionKey, 3)
+		backend.noDeactivate = true
+		deactivated := reloadDataEncryptionKey(dataEncryptionKey)
+		deactivated.Spec.Lifecycle = shared.DesiredLifecycleDeactivated
+		Expect(k8sClient.Update(ctx, deactivated)).To(Succeed())
+
+		// when
+		_, err := reconciler.Reconcile(ctx, requestFor(dataEncryptionKey))
+
+		// then
+		Expect(err).To(MatchError(errors.ErrUnsupported))
+		reloaded := reloadDataEncryptionKey(dataEncryptionKey)
+		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
+		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Reason).To(Equal("LifecycleTransitionFailed"))
+	})
+
+	DescribeTable("drops the finalizer once the backend has dealt with the key",
+		func(noDelete bool) {
+			// given
+			newDataEncryptionKeyReconciliationTenant(true)
+			newActiveServiceKeyForDataEncryptionKeyReconciliation()
+			dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+			drive(reconciler, dataEncryptionKey, 3)
+			backend.noDelete = noDelete
+
+			// when
+			Expect(k8sClient.Delete(ctx, reloadDataEncryptionKey(dataEncryptionKey))).To(Succeed())
+			drive(reconciler, dataEncryptionKey, 1)
+
+			// then
+			Expect(backend.deleteKeyCalls).To(ConsistOf(provisionedDataEncryptionKeyID))
+			err := k8sClient.Get(ctx, client.ObjectKeyFromObject(dataEncryptionKey), &operationsv1alpha1.DataEncryptionKey{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		},
+		Entry("the backend deletes it", false),
+		Entry("the backend cannot delete keys", true),
+	)
+
+	It("keeps the finalizer while the backend fails to delete the key", func() {
+		// given
+		newDataEncryptionKeyReconciliationTenant(true)
+		newActiveServiceKeyForDataEncryptionKeyReconciliation()
+		dataEncryptionKey := newDataEncryptionKeyForReconciliation()
+		drive(reconciler, dataEncryptionKey, 3)
+		backend.deleteKeyErr = errors.New("backend unavailable")
+
+		// when
+		Expect(k8sClient.Delete(ctx, reloadDataEncryptionKey(dataEncryptionKey))).To(Succeed())
+		_, err := reconciler.Reconcile(ctx, requestFor(dataEncryptionKey))
+
+		// then
+		Expect(err).To(HaveOccurred())
+		Expect(reloadDataEncryptionKey(dataEncryptionKey).Finalizers).NotTo(BeEmpty())
+	})
 })
+
+func TestDataEncryptionKeyOpenKCMNameIsUniquePerTenant(t *testing.T) {
+	// given
+	dataEncryptionKey := &operationsv1alpha1.DataEncryptionKey{}
+	dataEncryptionKey.Namespace = "team-a"
+	dataEncryptionKey.Name = "orders"
+	serviceKey := &operationsv1alpha1.ServiceKey{}
+	serviceKey.Namespace = dataEncryptionKey.Namespace
+	serviceKey.Name = dataEncryptionKey.Name
+	elsewhere := dataEncryptionKey.DeepCopy()
+	elsewhere.Namespace = "team-b"
+
+	// when
+	name := operations.DataEncryptionKeyOpenKCMName(dataEncryptionKey)
+
+	// then
+	assert.Equal(t, "dataencryptionkey:team-a.orders", name)
+	assert.NotEqual(t, operations.ServiceKeyOpenKCMName(serviceKey), name, "service key of the same name")
+	assert.NotEqual(t, operations.DataEncryptionKeyOpenKCMName(elsewhere), name, "same name in another namespace")
+}
