@@ -26,6 +26,22 @@ func startTestServer(t *testing.T) *openkcmapi.Client {
 	return openkcmapi.NewClient("http://" + listener.Addr().String())
 }
 
+func TestCreateTenantAllowsDuplicateNames(t *testing.T) {
+	client := startTestServer(t)
+
+	first, err := client.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: "acme"})
+	if err != nil {
+		t.Fatalf("create first tenant: %v", err)
+	}
+	second, err := client.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: "acme"})
+	if err != nil {
+		t.Fatalf("create second tenant: %v", err)
+	}
+	if first.ID == second.ID {
+		t.Fatal("duplicate tenant creation returned the same ID")
+	}
+}
+
 func TestRootKeyLifecycleEndpoints(t *testing.T) {
 	client := startTestServer(t)
 	ctx := t.Context()

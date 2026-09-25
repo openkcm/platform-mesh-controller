@@ -43,6 +43,7 @@ const (
 	domainKeyFinalizer = "operations.openkcm.io/domainkey-cleanup"
 	pollInterval       = 5 * time.Second
 	domainKeyTypeTeam  = "Team"
+	domainKeyKind      = "L2"
 )
 
 // DomainKeyReconciler reconciles a DomainKey object across KCP workspaces.
@@ -55,6 +56,7 @@ type DomainKeyReconciler struct {
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
 // Reconcile handles DomainKey create/update/delete events from KCP workspaces.
 func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -180,11 +182,11 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 	return ctrl.Result{}, nil
 }
 
-// resolveTenantID reads the backend tenant id the Tenant reconciler recorded on
-// the account's Tenant. An empty result means the tenant is not registered yet.
-func (r *DomainKeyReconciler) resolveTenantID(ctx context.Context, cl client.Client, accountName string) (string, error) {
+// resolveTenantID reads the backend tenant id recorded on the account Tenant.
+// An empty result means the tenant is not registered yet.
+func resolveTenantID(ctx context.Context, cl client.Client, account accountIdentity) (string, error) {
 	tenant := &operationsv1alpha1.Tenant{}
-	key := types.NamespacedName{Namespace: defaultAccountNamespace(r.AccountNamespace), Name: accountName}
+	key := types.NamespacedName{Namespace: account.Namespace, Name: account.Name}
 	if err := cl.Get(ctx, key, tenant); err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", nil
@@ -199,19 +201,17 @@ func (r *DomainKeyReconciler) resolveTenantID(ctx context.Context, cl client.Cli
 func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Tenant identity is path-derived (showroom#203). spec.tenantNameRef
-	// is advisory only; Tenant is account-scoped in v0.7.0.
-	accountName, err := resolveAccountName(ctx, cl)
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, dk, "TenantResolutionFailed", err.Error())
 		return ctrl.Result{}, err
 	}
-	if dk.Spec.TenantNameRef != "" && dk.Spec.TenantNameRef != accountName {
+	if dk.Spec.TenantNameRef != "" && dk.Spec.TenantNameRef != account.Name {
 		logger.Info("ignoring spec.tenantNameRef; using path-derived account",
-			"specName", dk.Spec.TenantNameRef, "accountName", accountName)
+			"specName", dk.Spec.TenantNameRef, "accountName", account.Name)
 	}
 
-	tenantID, err := r.resolveTenantID(ctx, cl, accountName)
+	tenantID, err := resolveTenantID(ctx, cl, account)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, dk, "TenantResolutionFailed", err.Error())
 		return ctrl.Result{}, err
@@ -224,7 +224,7 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenantID,
-		Kind:     "L2",
+		Kind:     domainKeyKind,
 		Name:     domainKeyOpenKCMName(dk),
 	})
 	if err != nil {

@@ -17,7 +17,6 @@ limitations under the License.
 package operations
 
 import (
-	"context"
 	"net"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -34,8 +33,6 @@ import (
 var _ = Describe("ServiceKey Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
-
-		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,

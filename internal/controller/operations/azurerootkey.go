@@ -34,22 +34,22 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const awsRootKeyFinalizer = "operations.openkcm.io/awsrootkey-cleanup"
+const azureRootKeyFinalizer = "operations.openkcm.io/azurerootkey-cleanup"
 
-// AWSRootKeyReconciler reconciles an AWSRootKey (L1) via the mock API.
-// Real AWS KMS / Roles Anywhere wiring is a follow-up; v0.7.0 stands in
-// the mock API for upstream calls per #216 acceptance criteria.
-type AWSRootKeyReconciler struct {
+// AzureRootKeyReconciler reconciles an AzureRootKey (L1) via the mock API.
+// Real Azure Key Vault / federated identity wiring is a follow-up.
+type AzureRootKeyReconciler struct {
 	APIClient        Backend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
 
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=azurerootkeys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=azurerootkeys/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=azurerootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
-func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
 
 	cl, err := r.clusterClient(ctx, req.ClusterName)
@@ -57,7 +57,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{}, err
 	}
 
-	rk := &operationsv1alpha1.AWSRootKey{}
+	rk := &operationsv1alpha1.AzureRootKey{}
 	if err := cl.Get(ctx, req.NamespacedName, rk); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -66,7 +66,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return r.handleDeletion(ctx, cl, rk)
 	}
 
-	if controllerutil.AddFinalizer(rk, awsRootKeyFinalizer) {
+	if controllerutil.AddFinalizer(rk, azureRootKeyFinalizer) {
 		if err := cl.Update(ctx, rk); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -81,39 +81,42 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
-		accountName, err := resolveAccountName(ctx, cl)
+		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != accountName {
+		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != account.Name {
 			logger.Info("ignoring spec.tenantNameRef; using path-derived account",
-				"specName", rk.Spec.TenantNameRef, "accountName", accountName)
+				"specName", rk.Spec.TenantNameRef, "accountName", account.Name)
 		}
-		tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
+		tenantID, err := resolveTenantID(ctx, cl, account)
 		if err != nil {
-			r.setFailed(ctx, cl, rk, "TenantCreateFailed", err.Error())
+			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
+		}
+		if tenantID == "" {
+			r.setFailed(ctx, cl, rk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+			return ctrl.Result{RequeueAfter: pollInterval}, nil
 		}
 
 		resp, err := r.APIClient.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
-			TenantID: tenantResp.ID,
-			Provider: "aws",
+			TenantID: tenantID,
+			Provider: "azure",
 			Name:     rk.Name,
 			Config: map[string]string{
-				"region":         rk.Spec.Region,
-				"keyUri":         rk.Spec.KeyURI,
-				"endpointUrl":    rk.Spec.EndpointURL,
-				"trustAnchorArn": rk.Spec.RolesAnywhere.TrustAnchorARN,
-				"profileArn":     rk.Spec.RolesAnywhere.ProfileARN,
-				"roleArn":        rk.Spec.RolesAnywhere.RoleARN,
+				"vaultUrl":   rk.Spec.VaultURL,
+				"keyName":    rk.Spec.KeyName,
+				"keyVersion": rk.Spec.KeyVersion,
+				"tenantId":   rk.Spec.FederatedIdentity.TenantID,
+				"clientId":   rk.Spec.FederatedIdentity.ClientID,
 			},
 		})
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "RootKeyCreateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		logger.Info("AWSRootKey registered", "rootKeyID", resp.ID)
+		logger.Info("AzureRootKey registered", "rootKeyID", resp.ID)
 
 		now := metav1.Now()
 		rk.Status.CryptoState = &shared.CryptoState{
@@ -123,13 +126,13 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		rk.Status.OperationID = resp.ID
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
-			Message:            "AWS root key registered; awaiting activation.",
+			Message:            "Azure root key registered; awaiting activation.",
 			InternalKeyID:      resp.ID,
 			LastTransitionTime: &now,
 			IdentityInfo: &shared.IdentityInfo{
-				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
+				Subject: "CN=" + account.Name + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
-					Name:      "aws-kms-ca",
+					Name:      "azure-kms-ca",
 					Namespace: openkcmSystemNamespace,
 					Key:       caCertKey,
 				},
@@ -157,25 +160,23 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
-	// PreActive → Active happens once. After that, Active⇄Deactivated is
-	// driven by spec.lifecycle in the reconcileLifecycle step below.
 	if rk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
 		activateResp, err := r.APIClient.ActivateKey(ctx, rk.Status.CryptoState.ID)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		logger.Info("AWSRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
+		logger.Info("AzureRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
 		now := metav1.Now()
 		rk.Status.CryptoState.LifecycleState = shared.LifecycleState(activateResp.LifecycleState)
 		rk.Status.CryptoState.Version = activateResp.Version
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
-		rk.Status.ReconciliationStatus.Message = "AWS KMS bound and authenticated."
+		rk.Status.ReconciliationStatus.Message = "Azure Key Vault bound and authenticated."
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,
 			Status:             metav1.ConditionTrue,
 			Reason:             reasonUpstreamAuthenticated,
-			Message:            "Successfully bound to AWS KMS",
+			Message:            "Successfully bound to Azure Key Vault",
 			ObservedGeneration: rk.Generation,
 		})
 	}
@@ -197,10 +198,10 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 				Type:               readyType,
 				Status:             metav1.ConditionFalse,
 				Reason:             reasonDeactivated,
-				Message:            "AWS root key deactivated per spec.lifecycle.",
+				Message:            "Azure root key deactivated per spec.lifecycle.",
 				ObservedGeneration: rk.Generation,
 			})
-			if err := r.cascadeDeactivate(ctx, cl, rk); err != nil {
+			if err := cascadeDeactivateRootKey(ctx, cl, "AzureRootKey", rk.Namespace, rk.Name); err != nil {
 				return ctrl.Result{}, err
 			}
 		} else {
@@ -208,7 +209,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 				Type:               readyType,
 				Status:             metav1.ConditionTrue,
 				Reason:             reasonUpstreamAuthenticated,
-				Message:            "AWS root key re-activated.",
+				Message:            "Azure root key re-activated.",
 				ObservedGeneration: rk.Generation,
 			})
 		}
@@ -220,33 +221,25 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	return ctrl.Result{}, ensureAutoDomainKeysForActiveAccountRoot(ctx, cl, rk.Namespace, r.AccountNamespace, rk.Status.CryptoState)
 }
 
-// cascadeDeactivate finds all DomainKeys in the same namespace that reference
-// this AWSRootKey via primary or fallback ref, and patches their
-// spec.lifecycle to Deactivated. Each DomainKey controller will then deactivate
-// itself and cascade further to ServiceKeys and DEKs.
-func (r *AWSRootKeyReconciler) cascadeDeactivate(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey) error {
-	return cascadeDeactivateRootKey(ctx, cl, "AWSRootKey", rk.Namespace, rk.Name)
-}
-
-func (r *AWSRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey) (ctrl.Result, error) {
+func (r *AzureRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AzureRootKey) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	if !controllerutil.ContainsFinalizer(rk, awsRootKeyFinalizer) {
+	if !controllerutil.ContainsFinalizer(rk, azureRootKeyFinalizer) {
 		return ctrl.Result{}, nil
 	}
 	if rk.Status.CryptoState != nil && rk.Status.CryptoState.ID != "" {
 		if err := r.APIClient.DeleteRootKey(ctx, rk.Status.CryptoState.ID); err != nil {
-			logger.Error(err, "Failed to delete AWSRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
+			logger.Error(err, "Failed to delete AzureRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
 		}
 	}
-	controllerutil.RemoveFinalizer(rk, awsRootKeyFinalizer)
+	controllerutil.RemoveFinalizer(rk, azureRootKeyFinalizer)
 	if err := cl.Update(ctx, rk); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey, reason, message string) {
+func (r *AzureRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AzureRootKey, reason, message string) {
 	now := metav1.Now()
 	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 		Success:            false,
@@ -265,15 +258,15 @@ func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, 
 	_ = cl.Status().Update(ctx, rk)
 }
 
-func (r *AWSRootKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
+func (r *AzureRootKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 	r.Manager = mgr
 	return mcbuilder.ControllerManagedBy(mgr).
-		Named("operations-awsrootkey").
-		For(&operationsv1alpha1.AWSRootKey{}).
+		Named("operations-azurerootkey").
+		For(&operationsv1alpha1.AzureRootKey{}).
 		Complete(r)
 }
 
-func (r *AWSRootKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
+func (r *AzureRootKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
 	cluster, err := r.Manager.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, err

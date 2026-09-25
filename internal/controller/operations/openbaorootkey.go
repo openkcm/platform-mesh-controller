@@ -34,21 +34,24 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const azureRootKeyFinalizer = "operations.openkcm.io/azurerootkey-cleanup"
+const openBaoRootKeyFinalizer = "operations.openkcm.io/openbaorootkey-cleanup"
 
-// AzureRootKeyReconciler reconciles an AzureRootKey (L1) via the mock API.
-// Real Azure Key Vault / federated identity wiring is a follow-up.
-type AzureRootKeyReconciler struct {
+// OpenBaoRootKeyReconciler reconciles an OpenBaoRootKey (L1) by registering
+// it with OpenKCM and reflecting upstream identity into status. Real
+// OpenBao Transit wiring is a follow-up; v0.7.0 talks only to the mock API.
+type OpenBaoRootKeyReconciler struct {
 	APIClient        Backend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
 
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=azurerootkeys,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=azurerootkeys/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=azurerootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=openbaorootkeys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=openbaorootkeys/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=openbaorootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
-func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+// Reconcile handles OpenBaoRootKey create/update/delete events.
+func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
 
 	cl, err := r.clusterClient(ctx, req.ClusterName)
@@ -56,7 +59,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		return ctrl.Result{}, err
 	}
 
-	rk := &operationsv1alpha1.AzureRootKey{}
+	rk := &operationsv1alpha1.OpenBaoRootKey{}
 	if err := cl.Get(ctx, req.NamespacedName, rk); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -65,7 +68,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		return r.handleDeletion(ctx, cl, rk)
 	}
 
-	if controllerutil.AddFinalizer(rk, azureRootKeyFinalizer) {
+	if controllerutil.AddFinalizer(rk, openBaoRootKeyFinalizer) {
 		if err := cl.Update(ctx, rk); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -79,39 +82,44 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		return ctrl.Result{}, ensureAutoDomainKeysForActiveAccountRoot(ctx, cl, rk.Namespace, r.AccountNamespace, rk.Status.CryptoState)
 	}
 
+	// Step 1: register with mock API.
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
-		accountName, err := resolveAccountName(ctx, cl)
+		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != accountName {
+		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != account.Name {
 			logger.Info("ignoring spec.tenantNameRef; using path-derived account",
-				"specName", rk.Spec.TenantNameRef, "accountName", accountName)
+				"specName", rk.Spec.TenantNameRef, "accountName", account.Name)
 		}
-		tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
+		tenantID, err := resolveTenantID(ctx, cl, account)
 		if err != nil {
-			r.setFailed(ctx, cl, rk, "TenantCreateFailed", err.Error())
+			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
+		}
+		if tenantID == "" {
+			r.setFailed(ctx, cl, rk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+			return ctrl.Result{RequeueAfter: pollInterval}, nil
 		}
 
 		resp, err := r.APIClient.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
-			TenantID: tenantResp.ID,
-			Provider: "azure",
+			TenantID: tenantID,
+			Provider: "openbao",
 			Name:     rk.Name,
 			Config: map[string]string{
-				"vaultUrl":   rk.Spec.VaultURL,
-				"keyName":    rk.Spec.KeyName,
-				"keyVersion": rk.Spec.KeyVersion,
-				"tenantId":   rk.Spec.FederatedIdentity.TenantID,
-				"clientId":   rk.Spec.FederatedIdentity.ClientID,
+				"enginePath":    rk.Spec.EnginePath,
+				"keyName":       rk.Spec.KeyName,
+				"serverAddress": rk.Spec.ServerAddress,
+				"authMountPath": rk.Spec.CertAuth.AuthMountPath,
+				"roleName":      rk.Spec.CertAuth.RoleName,
 			},
 		})
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "RootKeyCreateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		logger.Info("AzureRootKey registered", "rootKeyID", resp.ID)
+		logger.Info("OpenBaoRootKey registered", "rootKeyID", resp.ID)
 
 		now := metav1.Now()
 		rk.Status.CryptoState = &shared.CryptoState{
@@ -121,13 +129,13 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		rk.Status.OperationID = resp.ID
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
-			Message:            "Azure root key registered; awaiting activation.",
+			Message:            "OpenBao root key registered; awaiting activation.",
 			InternalKeyID:      resp.ID,
 			LastTransitionTime: &now,
 			IdentityInfo: &shared.IdentityInfo{
-				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
+				Subject: "CN=" + account.Name + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
-					Name:      "azure-kms-ca",
+					Name:      "openbao-kms-ca",
 					Namespace: openkcmSystemNamespace,
 					Key:       caCertKey,
 				},
@@ -147,6 +155,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
+	// Step 2: poll readiness and activate.
 	resp, err := r.APIClient.GetRootKey(ctx, rk.Status.CryptoState.ID)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -160,18 +169,27 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		logger.Info("AzureRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
+		logger.Info("OpenBaoRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
+
 		now := metav1.Now()
 		rk.Status.CryptoState.LifecycleState = shared.LifecycleState(activateResp.LifecycleState)
 		rk.Status.CryptoState.Version = activateResp.Version
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
-		rk.Status.ReconciliationStatus.Message = "Azure Key Vault bound and authenticated."
+		rk.Status.ReconciliationStatus.Message = "OpenBao root key bound and authenticated."
+
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,
 			Status:             metav1.ConditionTrue,
 			Reason:             reasonUpstreamAuthenticated,
-			Message:            "Successfully bound to Azure Key Vault",
+			Message:            "Successfully bound to OpenBao Transit",
+			ObservedGeneration: rk.Generation,
+		})
+		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
+			Type:               providerSyncedType,
+			Status:             metav1.ConditionTrue,
+			Reason:             reasonSyncSuccessful,
+			Message:            "Metadata fully replicated.",
 			ObservedGeneration: rk.Generation,
 		})
 	}
@@ -193,10 +211,10 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 				Type:               readyType,
 				Status:             metav1.ConditionFalse,
 				Reason:             reasonDeactivated,
-				Message:            "Azure root key deactivated per spec.lifecycle.",
+				Message:            "OpenBao root key deactivated per spec.lifecycle.",
 				ObservedGeneration: rk.Generation,
 			})
-			if err := cascadeDeactivateRootKey(ctx, cl, "AzureRootKey", rk.Namespace, rk.Name); err != nil {
+			if err := cascadeDeactivateRootKey(ctx, cl, "OpenBaoRootKey", rk.Namespace, rk.Name); err != nil {
 				return ctrl.Result{}, err
 			}
 		} else {
@@ -204,7 +222,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 				Type:               readyType,
 				Status:             metav1.ConditionTrue,
 				Reason:             reasonUpstreamAuthenticated,
-				Message:            "Azure root key re-activated.",
+				Message:            "OpenBao root key re-activated.",
 				ObservedGeneration: rk.Generation,
 			})
 		}
@@ -216,25 +234,25 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 	return ctrl.Result{}, ensureAutoDomainKeysForActiveAccountRoot(ctx, cl, rk.Namespace, r.AccountNamespace, rk.Status.CryptoState)
 }
 
-func (r *AzureRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AzureRootKey) (ctrl.Result, error) {
+func (r *OpenBaoRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, rk *operationsv1alpha1.OpenBaoRootKey) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	if !controllerutil.ContainsFinalizer(rk, azureRootKeyFinalizer) {
+	if !controllerutil.ContainsFinalizer(rk, openBaoRootKeyFinalizer) {
 		return ctrl.Result{}, nil
 	}
 	if rk.Status.CryptoState != nil && rk.Status.CryptoState.ID != "" {
 		if err := r.APIClient.DeleteRootKey(ctx, rk.Status.CryptoState.ID); err != nil {
-			logger.Error(err, "Failed to delete AzureRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
+			logger.Error(err, "Failed to delete OpenBaoRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
 		}
 	}
-	controllerutil.RemoveFinalizer(rk, azureRootKeyFinalizer)
+	controllerutil.RemoveFinalizer(rk, openBaoRootKeyFinalizer)
 	if err := cl.Update(ctx, rk); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *AzureRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AzureRootKey, reason, message string) {
+func (r *OpenBaoRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.OpenBaoRootKey, reason, message string) {
 	now := metav1.Now()
 	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 		Success:            false,
@@ -253,15 +271,15 @@ func (r *AzureRootKeyReconciler) setFailed(ctx context.Context, cl client.Client
 	_ = cl.Status().Update(ctx, rk)
 }
 
-func (r *AzureRootKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
+func (r *OpenBaoRootKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 	r.Manager = mgr
 	return mcbuilder.ControllerManagedBy(mgr).
-		Named("operations-azurerootkey").
-		For(&operationsv1alpha1.AzureRootKey{}).
+		Named("operations-openbaorootkey").
+		For(&operationsv1alpha1.OpenBaoRootKey{}).
 		Complete(r)
 }
 
-func (r *AzureRootKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
+func (r *OpenBaoRootKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
 	cluster, err := r.Manager.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, err

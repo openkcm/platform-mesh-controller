@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,7 +37,11 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
+const (
+	serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
+	// A service key sits one tier below the domain key it hangs off.
+	serviceKeyKind = "L3"
+)
 
 // ServiceKeyReconciler reconciles a ServiceKey object across KCP workspaces.
 //
@@ -46,13 +51,16 @@ const serviceKeyFinalizer = "operations.openkcm.io/servicekey-cleanup"
 // (PreActive|Active|Suspended|Deactivated|Compromised|Destroyed) back into
 // status as OpenKCM transitions it.
 type ServiceKeyReconciler struct {
-	APIClient Backend
-	Manager   mcmanager.Manager
+	APIClient        Backend
+	Manager          mcmanager.Manager
+	AccountNamespace string
 }
 
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=servicekeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
 // Reconcile handles ServiceKey create/update/delete events from KCP workspaces.
 func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -77,6 +85,10 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	if handled, res, err := r.ensureParentDomainKeyLink(ctx, cl, sk); handled {
+		return res, err
 	}
 
 	// Resolve the parent DomainKey by name (sibling in the same workspace).
@@ -117,54 +129,7 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 
 	// Step 1: new ServiceKey — register tenant + create L3 key.
 	if sk.Status.CryptoState == nil || sk.Status.CryptoState.ID == "" {
-		accountName, err := resolveAccountName(ctx, cl)
-		if err != nil {
-			r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-
-		tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
-		if err != nil {
-			r.setFailedCondition(ctx, cl, sk, "TenantCreateFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-
-		keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
-			TenantID: tenantResp.ID,
-			Kind:     "L3",
-			Name:     sk.Name,
-			ParentID: dk.Status.CryptoState.ID,
-		})
-		if err != nil {
-			r.setFailedCondition(ctx, cl, sk, "KeyCreateFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-
-		logger.Info("ServiceKey created in OpenKCM", "keyID", keyResp.ID, "parentKeyID", dk.Status.CryptoState.ID)
-		sk.Status.CryptoState = &shared.CryptoState{
-			ID:             keyResp.ID,
-			LifecycleState: shared.LifecyclePreActive,
-		}
-		sk.Status.OperationID = keyResp.ID
-		now := metav1.Now()
-		sk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
-			Success:            true,
-			Message:            "ServiceKey created in OpenKCM; awaiting activation.",
-			InternalKeyID:      keyResp.ID,
-			LastTransitionTime: &now,
-		}
-		meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
-			Type:               readyType,
-			Status:             metav1.ConditionFalse,
-			Reason:             reasonProcess,
-			Message:            "ServiceKey created, waiting for processing to complete",
-			ObservedGeneration: sk.Generation,
-		})
-		sk.Status.ObservedGeneration = sk.Generation
-		if err := cl.Status().Update(ctx, sk); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: pollInterval}, nil
+		return r.createServiceKey(ctx, cl, sk, dk)
 	}
 
 	// Step 2: key exists — drive to Active. Lifecycle is owned by OpenKCM;
@@ -237,6 +202,97 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey, dk *operationsv1alpha1.DomainKey) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
+	if err != nil {
+		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	tenantID, err := resolveTenantID(ctx, cl, account)
+	if err != nil {
+		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	if tenantID == "" {
+		r.setFailedCondition(ctx, cl, sk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+
+	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
+		TenantID: tenantID,
+		Kind:     serviceKeyKind,
+		Name:     sk.Name,
+		ParentID: dk.Status.CryptoState.ID,
+	})
+	if err != nil {
+		r.setFailedCondition(ctx, cl, sk, "KeyCreateFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("ServiceKey created in OpenKCM", "keyID", keyResp.ID, "parentKeyID", dk.Status.CryptoState.ID)
+	sk.Status.CryptoState = &shared.CryptoState{
+		ID:             keyResp.ID,
+		LifecycleState: shared.LifecyclePreActive,
+	}
+	sk.Status.OperationID = keyResp.ID
+	now := metav1.Now()
+	sk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
+		Success:            true,
+		Message:            "ServiceKey created in OpenKCM; awaiting activation.",
+		InternalKeyID:      keyResp.ID,
+		LastTransitionTime: &now,
+	}
+	meta.SetStatusCondition(&sk.Status.Conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonProcess,
+		Message:            "ServiceKey created, waiting for processing to complete",
+		ObservedGeneration: sk.Generation,
+	})
+	sk.Status.ObservedGeneration = sk.Generation
+	if err := cl.Status().Update(ctx, sk); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
+func (r *ServiceKeyReconciler) ensureParentDomainKeyLink(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey) (bool, ctrl.Result, error) {
+	if sk.Spec.DomainKeyRef != "" {
+		dk := &operationsv1alpha1.DomainKey{}
+		err := cl.Get(ctx, types.NamespacedName{Namespace: sk.Namespace, Name: sk.Spec.DomainKeyRef}, dk)
+		if err == nil {
+			return false, ctrl.Result{}, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return true, ctrl.Result{}, err
+		}
+	}
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
+	if err != nil {
+		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
+		return true, ctrl.Result{}, err
+	}
+	fallbackName := sk.Spec.DomainKeyRef
+	if fallbackName == "" {
+		fallbackName = account.Name
+	}
+	domainKeyName, err := ensureParentDomainKey(ctx, cl, sk.Namespace, fallbackName, account.Name)
+	if err != nil {
+		r.setFailedCondition(ctx, cl, sk, "DomainKeyCreateFailed", err.Error())
+		return true, ctrl.Result{}, err
+	}
+	if sk.Spec.DomainKeyRef != domainKeyName {
+		sk.Spec.DomainKeyRef = domainKeyName
+		if err := cl.Update(ctx, sk); err != nil {
+			return true, ctrl.Result{}, err
+		}
+		return true, ctrl.Result{}, nil
+	}
+	return true, ctrl.Result{RequeueAfter: pollInterval}, nil
 }
 
 func (r *ServiceKeyReconciler) setReady(sk *operationsv1alpha1.ServiceKey, reason, message string) {

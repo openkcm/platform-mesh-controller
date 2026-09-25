@@ -34,23 +34,23 @@ import (
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
-const openBaoRootKeyFinalizer = "operations.openkcm.io/openbaorootkey-cleanup"
+const awsRootKeyFinalizer = "operations.openkcm.io/awsrootkey-cleanup"
 
-// OpenBaoRootKeyReconciler reconciles an OpenBaoRootKey (L1) by registering
-// it with OpenKCM and reflecting upstream identity into status. Real
-// OpenBao Transit wiring is a follow-up; v0.7.0 talks only to the mock API.
-type OpenBaoRootKeyReconciler struct {
+// AWSRootKeyReconciler reconciles an AWSRootKey (L1) via the mock API.
+// Real AWS KMS / Roles Anywhere wiring is a follow-up; v0.7.0 stands in
+// the mock API for upstream calls per #216 acceptance criteria.
+type AWSRootKeyReconciler struct {
 	APIClient        Backend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
 
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=openbaorootkeys,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=openbaorootkeys/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=openbaorootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
-// Reconcile handles OpenBaoRootKey create/update/delete events.
-func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
 
 	cl, err := r.clusterClient(ctx, req.ClusterName)
@@ -58,7 +58,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return ctrl.Result{}, err
 	}
 
-	rk := &operationsv1alpha1.OpenBaoRootKey{}
+	rk := &operationsv1alpha1.AWSRootKey{}
 	if err := cl.Get(ctx, req.NamespacedName, rk); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -67,7 +67,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return r.handleDeletion(ctx, cl, rk)
 	}
 
-	if controllerutil.AddFinalizer(rk, openBaoRootKeyFinalizer) {
+	if controllerutil.AddFinalizer(rk, awsRootKeyFinalizer) {
 		if err := cl.Update(ctx, rk); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -81,40 +81,44 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return ctrl.Result{}, ensureAutoDomainKeysForActiveAccountRoot(ctx, cl, rk.Namespace, r.AccountNamespace, rk.Status.CryptoState)
 	}
 
-	// Step 1: register with mock API.
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
-		accountName, err := resolveAccountName(ctx, cl)
+		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != accountName {
+		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != account.Name {
 			logger.Info("ignoring spec.tenantNameRef; using path-derived account",
-				"specName", rk.Spec.TenantNameRef, "accountName", accountName)
+				"specName", rk.Spec.TenantNameRef, "accountName", account.Name)
 		}
-		tenantResp, err := r.APIClient.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: accountName})
+		tenantID, err := resolveTenantID(ctx, cl, account)
 		if err != nil {
-			r.setFailed(ctx, cl, rk, "TenantCreateFailed", err.Error())
+			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
 			return ctrl.Result{}, err
+		}
+		if tenantID == "" {
+			r.setFailed(ctx, cl, rk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+			return ctrl.Result{RequeueAfter: pollInterval}, nil
 		}
 
 		resp, err := r.APIClient.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
-			TenantID: tenantResp.ID,
-			Provider: "openbao",
+			TenantID: tenantID,
+			Provider: "aws",
 			Name:     rk.Name,
 			Config: map[string]string{
-				"enginePath":    rk.Spec.EnginePath,
-				"keyName":       rk.Spec.KeyName,
-				"serverAddress": rk.Spec.ServerAddress,
-				"authMountPath": rk.Spec.CertAuth.AuthMountPath,
-				"roleName":      rk.Spec.CertAuth.RoleName,
+				"region":         rk.Spec.Region,
+				"keyUri":         rk.Spec.KeyURI,
+				"endpointUrl":    rk.Spec.EndpointURL,
+				"trustAnchorArn": rk.Spec.RolesAnywhere.TrustAnchorARN,
+				"profileArn":     rk.Spec.RolesAnywhere.ProfileARN,
+				"roleArn":        rk.Spec.RolesAnywhere.RoleARN,
 			},
 		})
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "RootKeyCreateFailed", err.Error())
 			return ctrl.Result{}, err
 		}
-		logger.Info("OpenBaoRootKey registered", "rootKeyID", resp.ID)
+		logger.Info("AWSRootKey registered", "rootKeyID", resp.ID)
 
 		now := metav1.Now()
 		rk.Status.CryptoState = &shared.CryptoState{
@@ -124,13 +128,13 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		rk.Status.OperationID = resp.ID
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
-			Message:            "OpenBao root key registered; awaiting activation.",
+			Message:            "AWS root key registered; awaiting activation.",
 			InternalKeyID:      resp.ID,
 			LastTransitionTime: &now,
 			IdentityInfo: &shared.IdentityInfo{
-				Subject: "CN=" + accountName + " OU=Krypton, O=OpenKCM",
+				Subject: "CN=" + account.Name + " OU=Krypton, O=OpenKCM",
 				CertificateSecretRef: &shared.SecretKeyReference{
-					Name:      "openbao-kms-ca",
+					Name:      "aws-kms-ca",
 					Namespace: openkcmSystemNamespace,
 					Key:       caCertKey,
 				},
@@ -150,7 +154,6 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
-	// Step 2: poll readiness and activate.
 	resp, err := r.APIClient.GetRootKey(ctx, rk.Status.CryptoState.ID)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -159,32 +162,25 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
+	// PreActive → Active happens once. After that, Active⇄Deactivated is
+	// driven by spec.lifecycle in the reconcileLifecycle step below.
 	if rk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
 		activateResp, err := r.APIClient.ActivateKey(ctx, rk.Status.CryptoState.ID)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		logger.Info("OpenBaoRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
-
+		logger.Info("AWSRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
 		now := metav1.Now()
 		rk.Status.CryptoState.LifecycleState = shared.LifecycleState(activateResp.LifecycleState)
 		rk.Status.CryptoState.Version = activateResp.Version
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
-		rk.Status.ReconciliationStatus.Message = "OpenBao root key bound and authenticated."
-
+		rk.Status.ReconciliationStatus.Message = "AWS KMS bound and authenticated."
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,
 			Status:             metav1.ConditionTrue,
 			Reason:             reasonUpstreamAuthenticated,
-			Message:            "Successfully bound to OpenBao Transit",
-			ObservedGeneration: rk.Generation,
-		})
-		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               providerSyncedType,
-			Status:             metav1.ConditionTrue,
-			Reason:             reasonSyncSuccessful,
-			Message:            "Metadata fully replicated.",
+			Message:            "Successfully bound to AWS KMS",
 			ObservedGeneration: rk.Generation,
 		})
 	}
@@ -206,10 +202,10 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 				Type:               readyType,
 				Status:             metav1.ConditionFalse,
 				Reason:             reasonDeactivated,
-				Message:            "OpenBao root key deactivated per spec.lifecycle.",
+				Message:            "AWS root key deactivated per spec.lifecycle.",
 				ObservedGeneration: rk.Generation,
 			})
-			if err := cascadeDeactivateRootKey(ctx, cl, "OpenBaoRootKey", rk.Namespace, rk.Name); err != nil {
+			if err := r.cascadeDeactivate(ctx, cl, rk); err != nil {
 				return ctrl.Result{}, err
 			}
 		} else {
@@ -217,7 +213,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 				Type:               readyType,
 				Status:             metav1.ConditionTrue,
 				Reason:             reasonUpstreamAuthenticated,
-				Message:            "OpenBao root key re-activated.",
+				Message:            "AWS root key re-activated.",
 				ObservedGeneration: rk.Generation,
 			})
 		}
@@ -229,25 +225,33 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 	return ctrl.Result{}, ensureAutoDomainKeysForActiveAccountRoot(ctx, cl, rk.Namespace, r.AccountNamespace, rk.Status.CryptoState)
 }
 
-func (r *OpenBaoRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, rk *operationsv1alpha1.OpenBaoRootKey) (ctrl.Result, error) {
+// cascadeDeactivate finds all DomainKeys in the same namespace that reference
+// this AWSRootKey via primary or fallback ref, and patches their
+// spec.lifecycle to Deactivated. Each DomainKey controller will then deactivate
+// itself and cascade further to ServiceKeys and DEKs.
+func (r *AWSRootKeyReconciler) cascadeDeactivate(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey) error {
+	return cascadeDeactivateRootKey(ctx, cl, "AWSRootKey", rk.Namespace, rk.Name)
+}
+
+func (r *AWSRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	if !controllerutil.ContainsFinalizer(rk, openBaoRootKeyFinalizer) {
+	if !controllerutil.ContainsFinalizer(rk, awsRootKeyFinalizer) {
 		return ctrl.Result{}, nil
 	}
 	if rk.Status.CryptoState != nil && rk.Status.CryptoState.ID != "" {
 		if err := r.APIClient.DeleteRootKey(ctx, rk.Status.CryptoState.ID); err != nil {
-			logger.Error(err, "Failed to delete OpenBaoRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
+			logger.Error(err, "Failed to delete AWSRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
 		}
 	}
-	controllerutil.RemoveFinalizer(rk, openBaoRootKeyFinalizer)
+	controllerutil.RemoveFinalizer(rk, awsRootKeyFinalizer)
 	if err := cl.Update(ctx, rk); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
-func (r *OpenBaoRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.OpenBaoRootKey, reason, message string) {
+func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey, reason, message string) {
 	now := metav1.Now()
 	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 		Success:            false,
@@ -266,15 +270,15 @@ func (r *OpenBaoRootKeyReconciler) setFailed(ctx context.Context, cl client.Clie
 	_ = cl.Status().Update(ctx, rk)
 }
 
-func (r *OpenBaoRootKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
+func (r *AWSRootKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 	r.Manager = mgr
 	return mcbuilder.ControllerManagedBy(mgr).
-		Named("operations-openbaorootkey").
-		For(&operationsv1alpha1.OpenBaoRootKey{}).
+		Named("operations-awsrootkey").
+		For(&operationsv1alpha1.AWSRootKey{}).
 		Complete(r)
 }
 
-func (r *OpenBaoRootKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
+func (r *AWSRootKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
 	cluster, err := r.Manager.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, err
