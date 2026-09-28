@@ -134,20 +134,10 @@ func cascadeDeactivateDomainKey(ctx context.Context, cl client.Client, namespace
 	if err := cl.List(ctx, sks, client.InNamespace(namespace)); err != nil {
 		return err
 	}
-	for i := range sks.Items {
-		sk := &sks.Items[i]
-		if sk.Spec.DomainKeyRef != domainKeyName {
-			continue
-		}
-		if sk.Spec.Lifecycle == shared.DesiredLifecycleDeactivated {
-			continue
-		}
-		sk.Spec.Lifecycle = shared.DesiredLifecycleDeactivated
-		if err := cl.Update(ctx, sk); err != nil {
-			return err
-		}
-	}
-	return nil
+	return deactivateChildren(ctx, cl, pointersTo(sks.Items), domainKeyName,
+		func(sk *operationsv1alpha1.ServiceKey) string { return sk.Spec.DomainKeyRef },
+		func(sk *operationsv1alpha1.ServiceKey) *shared.DesiredLifecycle { return &sk.Spec.Lifecycle },
+	)
 }
 
 // cascadeDeactivateServiceKey patches spec.lifecycle=Deactivated on every
@@ -157,18 +147,40 @@ func cascadeDeactivateServiceKey(ctx context.Context, cl client.Client, namespac
 	if err := cl.List(ctx, deks, client.InNamespace(namespace)); err != nil {
 		return err
 	}
-	for i := range deks.Items {
-		dek := &deks.Items[i]
-		if dek.Spec.ServiceKeyRef != serviceKeyName {
+	return deactivateChildren(ctx, cl, pointersTo(deks.Items), serviceKeyName,
+		func(dek *operationsv1alpha1.DataEncryptionKey) string { return dek.Spec.ServiceKeyRef },
+		func(dek *operationsv1alpha1.DataEncryptionKey) *shared.DesiredLifecycle { return &dek.Spec.Lifecycle },
+	)
+}
+
+func deactivateChildren[T client.Object](
+	ctx context.Context,
+	cl client.Client,
+	children []T,
+	parentName string,
+	parentOf func(T) string,
+	lifecycleOf func(T) *shared.DesiredLifecycle,
+) error {
+	for _, child := range children {
+		if parentOf(child) != parentName {
 			continue
 		}
-		if dek.Spec.Lifecycle == shared.DesiredLifecycleDeactivated {
+		lifecycle := lifecycleOf(child)
+		if *lifecycle == shared.DesiredLifecycleDeactivated {
 			continue
 		}
-		dek.Spec.Lifecycle = shared.DesiredLifecycleDeactivated
-		if err := cl.Update(ctx, dek); err != nil {
+		*lifecycle = shared.DesiredLifecycleDeactivated
+		if err := cl.Update(ctx, child); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func pointersTo[T any](items []T) []*T {
+	pointers := make([]*T, len(items))
+	for i := range items {
+		pointers[i] = &items[i]
+	}
+	return pointers
 }

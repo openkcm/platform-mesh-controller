@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	. "github.com/onsi/ginkgo/v2"
@@ -26,6 +26,7 @@ import (
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 const (
@@ -51,7 +52,7 @@ func newDataEncryptionKeyReconciliationTenant(recorded bool) {
 	tenant.Name = testAccountName
 	tenant.Namespace = dataEncryptionKeyReconciliationNamespace
 	if recorded {
-		tenant.Annotations = map[string]string{tenantIDAnnotation: testTenantID}
+		tenant.Annotations = map[string]string{operations.TenantIDAnnotation: testTenantID}
 	}
 	Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
 }
@@ -103,14 +104,14 @@ func cleanupDataEncryptionKeyReconciliationObject(obj client.Object) {
 }
 
 var _ = Describe("DataEncryptionKeyReconciler", func() {
-	var reconciler *DataEncryptionKeyReconciler
+	var reconciler *operations.DataEncryptionKeyReconciler
 	var backend *provisioningBackend
 
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
 		ensureDataEncryptionKeyReconciliationNamespace()
 		backend = &provisioningBackend{}
-		reconciler = &DataEncryptionKeyReconciler{
+		reconciler = &operations.DataEncryptionKeyReconciler{
 			APIClient:        backend,
 			Manager:          newTestManager(),
 			AccountNamespace: dataEncryptionKeyReconciliationNamespace,
@@ -162,13 +163,13 @@ var _ = Describe("DataEncryptionKeyReconciler", func() {
 		result, err := reconciler.Reconcile(ctx, requestFor(dataEncryptionKey))
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(result.RequeueAfter).To(Equal(pollInterval))
+		Expect(result.RequeueAfter).To(Equal(operations.PollInterval))
 		Expect(backend.dekRequests).To(BeEmpty())
 		createTenantCalls, _, _ := backend.counts()
 		Expect(createTenantCalls).To(BeZero())
 		reloaded := &operationsv1alpha1.DataEncryptionKey{}
 		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(dataEncryptionKey), reloaded)).To(Succeed())
-		ready := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
+		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Reason).To(Equal("AwaitingTenant"))
 	})

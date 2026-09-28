@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"fmt"
@@ -27,6 +27,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 var bindingCounter int
@@ -62,7 +63,7 @@ func tenantExists() bool {
 	GinkgoHelper()
 
 	t := &operationsv1alpha1.Tenant{}
-	key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: testAccountName}
+	key := types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: testAccountName}
 	err := k8sClient.Get(ctx, key, t)
 	return err == nil
 }
@@ -71,7 +72,7 @@ func deleteTenantIfPresent() {
 	GinkgoHelper()
 
 	t := &operationsv1alpha1.Tenant{}
-	key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: testAccountName}
+	key := types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: testAccountName}
 	if err := k8sClient.Get(ctx, key, t); err == nil {
 		Expect(k8sClient.Delete(ctx, t)).To(Succeed())
 	}
@@ -84,12 +85,12 @@ func deleteTenantIfPresent() {
 }
 
 var _ = Describe("AccountBootstrapReconciler", func() {
-	var reconciler *AccountBootstrapReconciler
+	var reconciler *operations.AccountBootstrapReconciler
 
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
 		deleteTenantIfPresent()
-		reconciler = &AccountBootstrapReconciler{
+		reconciler = &operations.AccountBootstrapReconciler{
 			Manager:       newTestManager(),
 			DefaultRegion: testRegion,
 		}
@@ -110,19 +111,19 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 
 	Context("when the binding is not Bound yet", func() {
 		It("waits instead of bootstrapping against an unusable binding", func() {
-			b := newBinding(operationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBinding)
+			b := newBinding(operations.OperationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBinding)
 
 			res, err := reconciler.Reconcile(ctx, requestForBinding(b))
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.RequeueAfter).To(Equal(pollInterval))
+			Expect(res.RequeueAfter).To(Equal(operations.PollInterval))
 			Expect(tenantExists()).To(BeFalse())
 		})
 	})
 
 	Context("when the binding is being deleted", func() {
 		It("skips it rather than writing into a terminating workspace", func() {
-			b := newBinding(operationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
+			b := newBinding(operations.OperationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
 
 			// A finalizer keeps the object around long enough to be observed
 			// with a deletionTimestamp, which is the state Reconcile guards on.
@@ -149,7 +150,7 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 			ensureLogicalCluster("root:orgs:acme")
 			DeferCleanup(func() { ensureLogicalCluster(testWorkspace) })
 
-			b := newBinding(operationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
+			b := newBinding(operations.OperationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
 
 			res, err := reconciler.Reconcile(ctx, requestForBinding(b))
 
@@ -161,12 +162,12 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 
 	Context("when a bound OpenKCM binding lands in an account workspace", func() {
 		It("mints the Tenant and the singleton DomainKey", func() {
-			b := newBinding(operationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
+			b := newBinding(operations.OperationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
 
 			_, err := reconciler.Reconcile(ctx, requestForBinding(b))
 			Expect(err).NotTo(HaveOccurred())
 
-			key := types.NamespacedName{Namespace: defaultTenantNamespace, Name: testAccountName}
+			key := types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: testAccountName}
 
 			tenant := &operationsv1alpha1.Tenant{}
 			Expect(k8sClient.Get(ctx, key, tenant)).To(Succeed(),
@@ -181,7 +182,7 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 		})
 
 		It("is idempotent across repeated reconciles", func() {
-			b := newBinding(operationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
+			b := newBinding(operations.OperationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
 
 			for range 3 {
 				_, err := reconciler.Reconcile(ctx, requestForBinding(b))

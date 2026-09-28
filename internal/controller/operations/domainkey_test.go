@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"fmt"
@@ -31,6 +31,7 @@ import (
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 // domainKeyNamespace isolates these specs: the DomainKey singleton is scoped
@@ -59,12 +60,12 @@ func ensureRegisteredTenant() {
 		tenant = &operationsv1alpha1.Tenant{}
 		tenant.Name = testAccountName
 		tenant.Namespace = domainKeyNamespace
-		tenant.Annotations = map[string]string{tenantIDAnnotation: testTenantID}
+		tenant.Annotations = map[string]string{operations.TenantIDAnnotation: testTenantID}
 		Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
 		return
 	}
 	Expect(err).NotTo(HaveOccurred())
-	tenant.Annotations = map[string]string{tenantIDAnnotation: testTenantID}
+	tenant.Annotations = map[string]string{operations.TenantIDAnnotation: testTenantID}
 	Expect(k8sClient.Update(ctx, tenant)).To(Succeed())
 }
 
@@ -124,7 +125,7 @@ func reloadDomainKey(name string) *operationsv1alpha1.DomainKey {
 	return dk
 }
 
-func drive(reconciler *DomainKeyReconciler, dk *operationsv1alpha1.DomainKey, passes int) {
+func drive(reconciler *operations.DomainKeyReconciler, dk *operationsv1alpha1.DomainKey, passes int) {
 	GinkgoHelper()
 	for range passes {
 		_, err := reconciler.Reconcile(ctx, requestFor(dk))
@@ -149,15 +150,15 @@ func cleanupDomainKeyObject(obj client.Object, name string) {
 
 var _ = Describe("DomainKeyReconciler", func() {
 	var (
-		backend    *fakeBackend
-		reconciler *DomainKeyReconciler
+		backend    *testBackend
+		reconciler *operations.DomainKeyReconciler
 	)
 
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
 		ensureDomainKeyNamespace()
-		backend = &fakeBackend{}
-		reconciler = &DomainKeyReconciler{
+		backend = &testBackend{}
+		reconciler = &operations.DomainKeyReconciler{
 			APIClient:        backend,
 			Manager:          newTestManager(),
 			AccountNamespace: domainKeyNamespace,
@@ -178,7 +179,7 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(backend.createKeyCalls).To(BeEmpty(), "the backend must not be called before the finalizer is persisted")
-		Expect(reloadDomainKey(dk.Name).Finalizers).To(ContainElement(domainKeyFinalizer))
+		Expect(reloadDomainKey(dk.Name).Finalizers).To(ContainElement(testDomainKeyFinalizer))
 	})
 
 	It("registers and activates the key once its root is active", func() {
@@ -192,13 +193,13 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(backend.createKeyCalls[0].TenantID).To(Equal(testTenantID),
 			"the key must be created under the tenant the Tenant reconciler registered")
 		Expect(backend.createKeyCalls[0].Kind).To(Equal("L2"))
-		Expect(backend.activateKeyCalls).To(ContainElement(fakeKeyID))
+		Expect(backend.activateKeyCalls).To(ContainElement(testKeyID))
 
 		reloaded := reloadDomainKey(dk.Name)
 		Expect(reloaded.Status.CryptoState).NotTo(BeNil())
-		Expect(reloaded.Status.CryptoState.ID).To(Equal(fakeKeyID))
+		Expect(reloaded.Status.CryptoState.ID).To(Equal(testKeyID))
 		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
-		ready := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
+		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
 	})
@@ -222,7 +223,7 @@ var _ = Describe("DomainKeyReconciler", func() {
 
 		Expect(backend.createKeyCalls).To(BeEmpty(),
 			"without a registered tenant there is nothing to hang the key on")
-		ready := meta.FindStatusCondition(reloadDomainKey(dk.Name).Status.Conditions, readyType)
+		ready := meta.FindStatusCondition(reloadDomainKey(dk.Name).Status.Conditions, operations.ReadyType)
 		Expect(ready).NotTo(BeNil())
 		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
 	})

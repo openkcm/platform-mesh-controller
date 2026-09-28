@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kryptongrpc
+package kryptongrpc_test
 
 import (
 	"fmt"
@@ -22,10 +22,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/openkcm/openkcm-controller/api/shared"
+	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -40,69 +43,48 @@ func TestKeyClientAgainstLiveKrypton(t *testing.T) {
 	}
 
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	require.NoError(t, err, "dial")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	tenants := NewTenantClient(conn)
-	keys := NewKeyClient(conn)
+	tenants := kryptongrpc.NewTenantClient(conn)
+	keys := kryptongrpc.NewKeyClient(conn)
 	ctx := t.Context()
 	tag := fmt.Sprintf("live-%d", time.Now().UnixNano())
 
 	// given a tenant
 	tenant, err := tenants.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: tag})
-	if err != nil {
-		t.Fatalf("CreateTenant: %v", err)
-	}
+	require.NoError(t, err, "CreateTenant")
 
 	// when the root (K0) is announced and activated
 	root, err := keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID, Kind: "K0", Name: "root-" + tag,
 	})
-	if err != nil {
-		t.Fatalf("AnnounceKey K0: %v", err)
-	}
-	if root.ProcessingState != openkcmapi.ProcessingStateReady {
-		t.Fatalf("K0 processing = %q, want ready", root.ProcessingState)
-	}
-	if _, err := keys.ActivateKey(ctx, root.ID, tenant.ID); err != nil {
-		t.Fatalf("ActivateKey K0: %v", err)
-	}
+	require.NoError(t, err, "AnnounceKey K0")
+	require.Equal(t, openkcmapi.ProcessingStateReady, root.ProcessingState, "K0 processing")
+	_, err = keys.ActivateKey(ctx, root.ID, tenant.ID)
+	require.NoError(t, err, "ActivateKey K0")
 
 	// and the domain key (K1) is announced under it and activated
 	kek, err := keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID, Kind: "K1", Name: "kek-" + tag, ParentID: root.ID,
 	})
-	if err != nil {
-		t.Fatalf("AnnounceKey K1: %v", err)
-	}
+	require.NoError(t, err, "AnnounceKey K1")
 	act, err := keys.ActivateKey(ctx, kek.ID, tenant.ID)
-	if err != nil {
-		t.Fatalf("ActivateKey K1: %v", err)
-	}
+	require.NoError(t, err, "ActivateKey K1")
 
 	// then the read-back state is translated into the controller's vocabulary
-	if act.LifecycleState != string(shared.LifecycleActive) {
-		t.Errorf("activated K1 lifecycle = %q, want %q", act.LifecycleState, shared.LifecycleActive)
-	}
+	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated K1 lifecycle")
 	got, err := keys.GetKey(ctx, kek.ID, tenant.ID)
-	if err != nil {
-		t.Fatalf("GetKey K1: %v", err)
-	}
-	if got.LifecycleState != string(shared.LifecycleActive) {
-		t.Errorf("K1 lifecycle = %q, want %q", got.LifecycleState, shared.LifecycleActive)
-	}
-	if got.ProcessingState != openkcmapi.ProcessingStateReady {
-		t.Errorf("K1 processing = %q, want ready", got.ProcessingState)
-	}
+	require.NoError(t, err, "GetKey K1")
+	assert.Equal(t, string(shared.LifecycleActive), got.LifecycleState, "K1 lifecycle")
+	assert.Equal(t, openkcmapi.ProcessingStateReady, got.ProcessingState, "K1 processing")
 
 	// and a non-root key without a parent is rejected, not silently accepted
-	if _, err := keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
+	_, err = keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID, Kind: "K1", Name: "orphan-" + tag,
-	}); err == nil {
-		t.Error("AnnounceKey K1 without a parent must fail")
-	} else if !openkcmapi.IsRetryable(err) && !openkcmapi.IsNotFound(err) {
+	})
+	require.Error(t, err, "AnnounceKey K1 without a parent must fail")
+	if !openkcmapi.IsRetryable(err) && !openkcmapi.IsNotFound(err) {
 		t.Logf("orphan K1 rejected as expected: %v", err)
 	}
 }
@@ -117,42 +99,30 @@ func TestBackendAgainstLiveKrypton(t *testing.T) {
 	}
 
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	require.NoError(t, err, "dial")
 	t.Cleanup(func() { _ = conn.Close() })
 
-	b := NewBackend(conn, BackendOptions{})
-	tenants := NewTenantClient(conn)
+	b := kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
+	tenants := kryptongrpc.NewTenantClient(conn)
 	ctx := t.Context()
 	tag := fmt.Sprintf("be-%d", time.Now().UnixNano())
 
 	// given a tenant
 	tenant, err := tenants.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: tag})
-	if err != nil {
-		t.Fatalf("CreateTenant: %v", err)
-	}
+	require.NoError(t, err, "CreateTenant")
 
 	// when a domain key is created with no explicit root or parent
 	created, err := b.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID, Kind: "L2", Name: "domain-" + tag,
 	})
-	if err != nil {
-		t.Fatalf("CreateKey: %v", err)
-	}
+	require.NoError(t, err, "CreateKey")
 
 	// then the id carries the tenant and the key reads back and activates
-	if _, _, err := unpackKeyID(created.ID); err != nil {
-		t.Fatalf("returned id is not a packed handle: %v", err)
-	}
-	if _, err := b.GetKey(ctx, created.ID); err != nil {
-		t.Fatalf("GetKey: %v", err)
-	}
+	_, _, err = kryptongrpc.UnpackKeyID(created.ID)
+	require.NoError(t, err, "returned id is not a packed handle")
+	_, err = b.GetKey(ctx, created.ID)
+	require.NoError(t, err, "GetKey")
 	act, err := b.ActivateKey(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("ActivateKey: %v", err)
-	}
-	if act.LifecycleState != string(shared.LifecycleActive) {
-		t.Errorf("activated domain key lifecycle = %q, want Active", act.LifecycleState)
-	}
+	require.NoError(t, err, "ActivateKey")
+	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated domain key lifecycle")
 }

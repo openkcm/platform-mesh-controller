@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"errors"
@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 	"github.com/openkcm/openkcm-controller/internal/mockapi"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
@@ -45,7 +46,7 @@ func newTenant() *operationsv1alpha1.Tenant {
 	tenantCounter++
 	t := &operationsv1alpha1.Tenant{}
 	t.Name = fmt.Sprintf("tenant-%d", tenantCounter)
-	t.Namespace = defaultTenantNamespace
+	t.Namespace = testDefaultTenantNamespace
 	Expect(k8sClient.Create(ctx, t)).To(Succeed())
 	return t
 }
@@ -54,7 +55,7 @@ func reloadTenant(name string) *operationsv1alpha1.Tenant {
 	GinkgoHelper()
 
 	t := &operationsv1alpha1.Tenant{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: defaultTenantNamespace}, t)).To(Succeed())
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: testDefaultTenantNamespace}, t)).To(Succeed())
 	return t
 }
 
@@ -64,14 +65,14 @@ func tenantGone(string) (*openkcmapi.GetTenantResponse, error) {
 
 var _ = Describe("TenantReconciler", func() {
 	var (
-		backend    *fakeBackend
-		reconciler *TenantReconciler
+		backend    *testBackend
+		reconciler *operations.TenantReconciler
 	)
 
 	BeforeEach(func() {
 		ensureLogicalCluster(testWorkspace)
-		backend = &fakeBackend{}
-		reconciler = &TenantReconciler{APIClient: backend, Manager: newTestManager()}
+		backend = &testBackend{}
+		reconciler = &operations.TenantReconciler{APIClient: backend, Manager: newTestManager()}
 	})
 
 	Context("when a Tenant is first seen", func() {
@@ -88,7 +89,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(get).To(Equal(0))
 			Expect(del).To(Equal(0))
 
-			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(operations.TenantFinalizer))
 		})
 	})
 
@@ -100,17 +101,17 @@ var _ = Describe("TenantReconciler", func() {
 
 			res, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.RequeueAfter).To(Equal(pollInterval))
+			Expect(res.RequeueAfter).To(Equal(operations.PollInterval))
 
 			Expect(backend.createTenantCalls).To(Equal([]string{testAccountName}),
 				"the account name must come from the workspace path, not metadata.name")
 
 			reloaded := reloadTenant(tenant.Name)
-			Expect(reloaded.Annotations).To(HaveKeyWithValue(tenantIDAnnotation, testTenantID))
-			cond := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
+			Expect(reloaded.Annotations).To(HaveKeyWithValue(operations.TenantIDAnnotation, testTenantID))
+			cond := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(reasonProcess))
+			Expect(cond.Reason).To(Equal(operations.ReasonProcess))
 		})
 
 		It("surfaces a backend failure on the object instead of only logging it", func() {
@@ -125,10 +126,10 @@ var _ = Describe("TenantReconciler", func() {
 			_, err = reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).To(HaveOccurred())
 
-			cond := meta.FindStatusCondition(reloadTenant(tenant.Name).Status.Conditions, readyType)
+			cond := meta.FindStatusCondition(reloadTenant(tenant.Name).Status.Conditions, operations.ReadyType)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(reasonFailed))
+			Expect(cond.Reason).To(Equal(operations.ReasonFailed))
 			Expect(cond.Message).To(ContainSubstring("krypton unavailable"))
 		})
 	})
@@ -147,10 +148,10 @@ var _ = Describe("TenantReconciler", func() {
 
 			res, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.RequeueAfter).To(Equal(pollInterval))
+			Expect(res.RequeueAfter).To(Equal(operations.PollInterval))
 
-			cond := meta.FindStatusCondition(reloadTenant(tenant.Name).Status.Conditions, readyType)
-			Expect(cond.Reason).To(Equal(reasonProcess), "must not go Ready before the backend says so")
+			cond := meta.FindStatusCondition(reloadTenant(tenant.Name).Status.Conditions, operations.ReadyType)
+			Expect(cond.Reason).To(Equal(operations.ReasonProcess), "must not go Ready before the backend says so")
 		})
 
 		It("goes Ready once the backend reports the tenant provisioned", func() {
@@ -166,7 +167,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(backend.getTenantCalls).To(Equal([]string{testTenantID}))
 
 			reloaded := reloadTenant(tenant.Name)
-			cond := meta.FindStatusCondition(reloaded.Status.Conditions, readyType)
+			cond := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			Expect(reloaded.Status.OperationID).To(Equal(testTenantID))
 			Expect(reloaded.Status.ObservedGeneration).To(Equal(reloaded.Generation))
@@ -200,7 +201,7 @@ var _ = Describe("TenantReconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(operations.TenantFinalizer))
 		})
 
 		It("releases the object when the backend cannot delete", func() {
@@ -218,7 +219,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(backend.deleteTenantCalls).To(Equal([]string{testTenantID}))
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
+				types.NamespacedName{Name: tenant.Name, Namespace: testDefaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -285,7 +286,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(backend.deleteTenantCalls).To(Equal([]string{testTenantID}))
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
+				types.NamespacedName{Name: tenant.Name, Namespace: testDefaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -300,14 +301,14 @@ var _ = Describe("TenantReconciler", func() {
 				_, err := reconciler.Reconcile(ctx, requestFor(tenant))
 				Expect(err).NotTo(HaveOccurred())
 			}
-			Expect(reloadTenant(tenant.Name).Annotations).To(HaveKey(tenantIDAnnotation))
+			Expect(reloadTenant(tenant.Name).Annotations).To(HaveKey(operations.TenantIDAnnotation))
 
 			Expect(k8sClient.Delete(ctx, reloadTenant(tenant.Name))).To(Succeed())
 			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
+				types.NamespacedName{Name: tenant.Name, Namespace: testDefaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -323,15 +324,15 @@ var _ = Describe("TenantReconciler", func() {
 
 			res, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.RequeueAfter).To(Equal(pollInterval))
-			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
+			Expect(res.RequeueAfter).To(Equal(operations.PollInterval))
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(operations.TenantFinalizer))
 
 			backend.getTenantFn = tenantGone
 			_, err = reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx,
-				types.NamespacedName{Name: tenant.Name, Namespace: defaultTenantNamespace},
+				types.NamespacedName{Name: tenant.Name, Namespace: testDefaultTenantNamespace},
 				&operationsv1alpha1.Tenant{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
@@ -351,7 +352,7 @@ var _ = Describe("TenantReconciler", func() {
 
 			_, err := reconciler.Reconcile(ctx, requestFor(tenant))
 			Expect(err).To(HaveOccurred())
-			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(tenantFinalizer))
+			Expect(reloadTenant(tenant.Name).Finalizers).To(ContainElement(operations.TenantFinalizer))
 		})
 
 		It("holds the finalizer while the backend refuses the delete", func() {
@@ -370,7 +371,7 @@ var _ = Describe("TenantReconciler", func() {
 			Expect(err).To(HaveOccurred())
 
 			still := reloadTenant(tenant.Name)
-			Expect(still.Finalizers).To(ContainElement(tenantFinalizer))
+			Expect(still.Finalizers).To(ContainElement(operations.TenantFinalizer))
 			Expect(still.DeletionTimestamp).NotTo(BeNil())
 		})
 	})

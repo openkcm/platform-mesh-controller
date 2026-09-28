@@ -40,7 +40,7 @@ func ensureCascadeNamespace() {
 	GinkgoHelper()
 	namespace := &corev1.Namespace{}
 	namespace.Name = cascadeNamespace
-	err := operations.CascadeTestClient().Create(operations.CascadeTestContext(), namespace)
+	err := k8sClient.Create(ctx, namespace)
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		Expect(err).NotTo(HaveOccurred())
 	}
@@ -51,19 +51,19 @@ func drop(obj client.Object) {
 	if obj.GetFinalizers() != nil {
 		obj.SetFinalizers(nil)
 		Expect(client.IgnoreNotFound(
-			operations.CascadeTestClient().Update(operations.CascadeTestContext(), obj),
+			k8sClient.Update(ctx, obj),
 		)).To(Succeed())
 	}
 	Expect(client.IgnoreNotFound(
-		operations.CascadeTestClient().Delete(operations.CascadeTestContext(), obj),
+		k8sClient.Delete(ctx, obj),
 	)).To(Succeed())
 }
 
 func cleanupCascadeNamespace() {
 	GinkgoHelper()
 	dataEncryptionKeys := &operationsv1alpha1.DataEncryptionKeyList{}
-	Expect(operations.CascadeTestClient().List(
-		operations.CascadeTestContext(),
+	Expect(k8sClient.List(
+		ctx,
 		dataEncryptionKeys,
 		client.InNamespace(cascadeNamespace),
 	)).To(Succeed())
@@ -71,8 +71,8 @@ func cleanupCascadeNamespace() {
 		drop(&dataEncryptionKeys.Items[index])
 	}
 	serviceKeys := &operationsv1alpha1.ServiceKeyList{}
-	Expect(operations.CascadeTestClient().List(
-		operations.CascadeTestContext(),
+	Expect(k8sClient.List(
+		ctx,
 		serviceKeys,
 		client.InNamespace(cascadeNamespace),
 	)).To(Succeed())
@@ -80,8 +80,8 @@ func cleanupCascadeNamespace() {
 		drop(&serviceKeys.Items[index])
 	}
 	domainKeys := &operationsv1alpha1.DomainKeyList{}
-	Expect(operations.CascadeTestClient().List(
-		operations.CascadeTestContext(),
+	Expect(k8sClient.List(
+		ctx,
 		domainKeys,
 		client.InNamespace(cascadeNamespace),
 	)).To(Succeed())
@@ -94,9 +94,9 @@ var _ = Describe("key-chain cascade", func() {
 	var backend operations.Backend
 
 	BeforeEach(func() {
-		operations.EnsureCascadeLogicalClusterForTest()
+		ensureLogicalCluster(testWorkspace)
 		ensureCascadeNamespace()
-		backend = operations.NewCascadeTestBackend()
+		backend = &testBackend{}
 	})
 
 	AfterEach(cleanupCascadeNamespace)
@@ -104,22 +104,22 @@ var _ = Describe("key-chain cascade", func() {
 	It("creates and links a DomainKey when a ServiceKey references none", func() {
 		reconciler := &operations.ServiceKeyReconciler{
 			APIClient: backend,
-			Manager:   operations.NewCascadeTestManager(),
+			Manager:   newTestManager(),
 		}
 		serviceKey := &operationsv1alpha1.ServiceKey{}
 		serviceKey.Name = "svc-a"
 		serviceKey.Namespace = cascadeNamespace
 		serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{TenantNameRef: cascadeAccountName}
-		Expect(operations.CascadeTestClient().Create(operations.CascadeTestContext(), serviceKey)).To(Succeed())
+		Expect(k8sClient.Create(ctx, serviceKey)).To(Succeed())
 
 		for range 2 {
-			_, err := reconciler.Reconcile(operations.CascadeTestContext(), operations.CascadeRequestForTest(serviceKey))
+			_, err := reconciler.Reconcile(ctx, requestFor(serviceKey))
 			Expect(err).NotTo(HaveOccurred())
 		}
 
 		reloaded := &operationsv1alpha1.ServiceKey{}
-		Expect(operations.CascadeTestClient().Get(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.Get(
+			ctx,
 			types.NamespacedName{Name: "svc-a", Namespace: cascadeNamespace},
 			reloaded,
 		)).To(Succeed())
@@ -127,8 +127,8 @@ var _ = Describe("key-chain cascade", func() {
 			"the cascade must link the ServiceKey to the created DomainKey")
 
 		domainKey := &operationsv1alpha1.DomainKey{}
-		Expect(operations.CascadeTestClient().Get(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.Get(
+			ctx,
 			types.NamespacedName{Name: cascadeAccountName, Namespace: cascadeNamespace},
 			domainKey,
 		)).To(Succeed())
@@ -142,26 +142,26 @@ var _ = Describe("key-chain cascade", func() {
 			Type:          cascadeDomainKeyTypeTeam,
 			TenantNameRef: cascadeAccountName,
 		}
-		Expect(operations.CascadeTestClient().Create(operations.CascadeTestContext(), existing)).To(Succeed())
+		Expect(k8sClient.Create(ctx, existing)).To(Succeed())
 
 		reconciler := &operations.ServiceKeyReconciler{
 			APIClient: backend,
-			Manager:   operations.NewCascadeTestManager(),
+			Manager:   newTestManager(),
 		}
 		serviceKey := &operationsv1alpha1.ServiceKey{}
 		serviceKey.Name = "svc-b"
 		serviceKey.Namespace = cascadeNamespace
 		serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{TenantNameRef: cascadeAccountName}
-		Expect(operations.CascadeTestClient().Create(operations.CascadeTestContext(), serviceKey)).To(Succeed())
+		Expect(k8sClient.Create(ctx, serviceKey)).To(Succeed())
 
 		for range 2 {
-			_, err := reconciler.Reconcile(operations.CascadeTestContext(), operations.CascadeRequestForTest(serviceKey))
+			_, err := reconciler.Reconcile(ctx, requestFor(serviceKey))
 			Expect(err).NotTo(HaveOccurred())
 		}
 
 		reloaded := &operationsv1alpha1.ServiceKey{}
-		Expect(operations.CascadeTestClient().Get(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.Get(
+			ctx,
 			types.NamespacedName{Name: "svc-b", Namespace: cascadeNamespace},
 			reloaded,
 		)).To(Succeed())
@@ -169,8 +169,8 @@ var _ = Describe("key-chain cascade", func() {
 			"the cascade must reuse the namespace's DomainKey, not create a second")
 
 		domainKeys := &operationsv1alpha1.DomainKeyList{}
-		Expect(operations.CascadeTestClient().List(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.List(
+			ctx,
 			domainKeys,
 			client.InNamespace(cascadeNamespace),
 		)).To(Succeed())
@@ -180,25 +180,25 @@ var _ = Describe("key-chain cascade", func() {
 	It("creates and links a ServiceKey when a data key references none", func() {
 		reconciler := &operations.DataEncryptionKeyReconciler{
 			APIClient: backend,
-			Manager:   operations.NewCascadeTestManager(),
+			Manager:   newTestManager(),
 		}
 		dataEncryptionKey := &operationsv1alpha1.DataEncryptionKey{}
 		dataEncryptionKey.Name = cascadeDEKName
 		dataEncryptionKey.Namespace = cascadeNamespace
 		dataEncryptionKey.Spec = operationsv1alpha1.DataEncryptionKeySpec{TenantNameRef: cascadeAccountName}
-		Expect(operations.CascadeTestClient().Create(operations.CascadeTestContext(), dataEncryptionKey)).To(Succeed())
+		Expect(k8sClient.Create(ctx, dataEncryptionKey)).To(Succeed())
 
 		for range 2 {
 			_, err := reconciler.Reconcile(
-				operations.CascadeTestContext(),
-				operations.CascadeRequestForTest(dataEncryptionKey),
+				ctx,
+				requestFor(dataEncryptionKey),
 			)
 			Expect(err).NotTo(HaveOccurred())
 		}
 
 		reloaded := &operationsv1alpha1.DataEncryptionKey{}
-		Expect(operations.CascadeTestClient().Get(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.Get(
+			ctx,
 			types.NamespacedName{Name: cascadeDEKName, Namespace: cascadeNamespace},
 			reloaded,
 		)).To(Succeed())
@@ -206,8 +206,8 @@ var _ = Describe("key-chain cascade", func() {
 			"the cascade must link the data key to the created ServiceKey")
 
 		serviceKey := &operationsv1alpha1.ServiceKey{}
-		Expect(operations.CascadeTestClient().Get(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.Get(
+			ctx,
 			types.NamespacedName{Name: cascadeDEKName, Namespace: cascadeNamespace},
 			serviceKey,
 		)).To(Succeed())
@@ -218,7 +218,7 @@ var _ = Describe("key-chain cascade", func() {
 	It("creates the referenced ServiceKey when a data key names one that is missing", func() {
 		reconciler := &operations.DataEncryptionKeyReconciler{
 			APIClient: backend,
-			Manager:   operations.NewCascadeTestManager(),
+			Manager:   newTestManager(),
 		}
 		dataEncryptionKey := &operationsv1alpha1.DataEncryptionKey{}
 		dataEncryptionKey.Name = "dek-c"
@@ -227,19 +227,19 @@ var _ = Describe("key-chain cascade", func() {
 			TenantNameRef: cascadeAccountName,
 			ServiceKeyRef: "named-sk",
 		}
-		Expect(operations.CascadeTestClient().Create(operations.CascadeTestContext(), dataEncryptionKey)).To(Succeed())
+		Expect(k8sClient.Create(ctx, dataEncryptionKey)).To(Succeed())
 
 		for range 2 {
 			_, err := reconciler.Reconcile(
-				operations.CascadeTestContext(),
-				operations.CascadeRequestForTest(dataEncryptionKey),
+				ctx,
+				requestFor(dataEncryptionKey),
 			)
 			Expect(err).NotTo(HaveOccurred())
 		}
 
 		serviceKey := &operationsv1alpha1.ServiceKey{}
-		Expect(operations.CascadeTestClient().Get(
-			operations.CascadeTestContext(),
+		Expect(k8sClient.Get(
+			ctx,
 			types.NamespacedName{Name: "named-sk", Namespace: cascadeNamespace},
 			serviceKey,
 		)).To(Succeed(), "a referenced-but-missing parent must be created, per issue #17")

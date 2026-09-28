@@ -8,17 +8,19 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 */
 
-package operations
+package operations_test
 
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 )
 
 const (
@@ -29,21 +31,19 @@ const (
 func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme), "add operations scheme")
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
 			// DK referencing the L1 as primary.
 			&operationsv1alpha1.DomainKey{
-				Name: "dk-primary", Namespace: defaultTenantNamespace,
+				Name: "dk-primary", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          domainKeyTypeTeam,
+					Type:          testDomainKeyTypeTeam,
 					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup: operationsAPIExportName,
+						APIGroup: operations.OperationsAPIExportName,
 						Kind:     testOpenBaoRootKeyKind, Name: rkPrimary,
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
@@ -51,16 +51,16 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 			},
 			// DK referencing the L1 as a fallback.
 			&operationsv1alpha1.DomainKey{
-				Name: "dk-fallback", Namespace: defaultTenantNamespace,
+				Name: "dk-fallback", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          domainKeyTypeTeam,
+					Type:          testDomainKeyTypeTeam,
 					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup: operationsAPIExportName,
+						APIGroup: operations.OperationsAPIExportName,
 						Kind:     "AzureRootKey", Name: "other-primary",
 					},
 					FallbackRootKeyRefs: []shared.TypedReference{{
-						APIGroup: operationsAPIExportName,
+						APIGroup: operations.OperationsAPIExportName,
 						Kind:     testOpenBaoRootKeyKind, Name: rkPrimary,
 					}},
 					Lifecycle: shared.DesiredLifecycleActive,
@@ -70,12 +70,12 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 			&operationsv1alpha1.DomainKey{
 				Name: "dk-namespace", Namespace: teamA,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          domainKeyTypeTeam,
+					Type:          testDomainKeyTypeTeam,
 					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup:  operationsAPIExportName,
+						APIGroup:  operations.OperationsAPIExportName,
 						Kind:      testOpenBaoRootKeyKind,
-						Namespace: defaultTenantNamespace,
+						Namespace: testDefaultTenantNamespace,
 						Name:      rkPrimary,
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
@@ -83,12 +83,12 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 			},
 			// DK NOT referencing the L1.
 			&operationsv1alpha1.DomainKey{
-				Name: "dk-unrelated", Namespace: defaultTenantNamespace,
+				Name: "dk-unrelated", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.DomainKeySpec{
-					Type:          domainKeyTypeTeam,
+					Type:          testDomainKeyTypeTeam,
 					TenantNameRef: accountRef,
 					PrimaryRootKeyRef: &shared.TypedReference{
-						APIGroup: operationsAPIExportName,
+						APIGroup: operations.OperationsAPIExportName,
 						Kind:     testAWSRootKeyKind, Name: "different",
 					},
 					Lifecycle: shared.DesiredLifecycleActive,
@@ -97,43 +97,37 @@ func TestCascadeDeactivateRootKey_PrimaryAndFallbackRefs(t *testing.T) {
 		).
 		Build()
 
-	if err := cascadeDeactivateRootKey(ctx, cl, testOpenBaoRootKeyKind, defaultTenantNamespace, rkPrimary); err != nil {
-		t.Fatalf("cascadeDeactivateRootKey: %v", err)
-	}
+	err := operations.CascadeDeactivateRootKey(ctx, cl, testOpenBaoRootKeyKind, testDefaultTenantNamespace, rkPrimary)
+	require.NoError(t, err, "cascadeDeactivateRootKey")
 
 	cases := []struct {
 		namespace string
 		name      string
 		want      shared.DesiredLifecycle
 	}{
-		{defaultTenantNamespace, "dk-primary", shared.DesiredLifecycleDeactivated},
-		{defaultTenantNamespace, "dk-fallback", shared.DesiredLifecycleDeactivated},
+		{testDefaultTenantNamespace, "dk-primary", shared.DesiredLifecycleDeactivated},
+		{testDefaultTenantNamespace, "dk-fallback", shared.DesiredLifecycleDeactivated},
 		{teamA, "dk-namespace", shared.DesiredLifecycleDeactivated},
-		{defaultTenantNamespace, "dk-unrelated", shared.DesiredLifecycleActive},
+		{testDefaultTenantNamespace, "dk-unrelated", shared.DesiredLifecycleActive},
 	}
 	for _, c := range cases {
 		dk := &operationsv1alpha1.DomainKey{}
-		if err := cl.Get(ctx, types.NamespacedName{Namespace: c.namespace, Name: c.name}, dk); err != nil {
-			t.Fatalf("get %s: %v", c.name, err)
-		}
-		if dk.Spec.Lifecycle != c.want {
-			t.Fatalf("%s.spec.lifecycle = %q, want %q", c.name, dk.Spec.Lifecycle, c.want)
-		}
+		key := types.NamespacedName{Namespace: c.namespace, Name: c.name}
+		require.NoErrorf(t, cl.Get(ctx, key, dk), "get %s", c.name)
+		require.Equalf(t, c.want, dk.Spec.Lifecycle, "%s.spec.lifecycle", c.name)
 	}
 }
 
 func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
-	if err := operationsv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("add operations scheme: %v", err)
-	}
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme), "add operations scheme")
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(
 			&operationsv1alpha1.ServiceKey{
-				Name: "sk-1", Namespace: defaultTenantNamespace,
+				Name: "sk-1", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.ServiceKeySpec{
 					TenantNameRef: accountRef,
 					DomainKeyRef:  "dk-1",
@@ -141,7 +135,15 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 				},
 			},
 			&operationsv1alpha1.ServiceKey{
-				Name: "sk-2", Namespace: defaultTenantNamespace,
+				Name: "sk-3", Namespace: testDefaultTenantNamespace,
+				Spec: operationsv1alpha1.ServiceKeySpec{
+					TenantNameRef: accountRef,
+					DomainKeyRef:  "dk-1",
+					Lifecycle:     shared.DesiredLifecycleActive,
+				},
+			},
+			&operationsv1alpha1.ServiceKey{
+				Name: "sk-2", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.ServiceKeySpec{
 					TenantNameRef: accountRef,
 					DomainKeyRef:  "different-dk",
@@ -149,7 +151,7 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 				},
 			},
 			&operationsv1alpha1.DataEncryptionKey{
-				Name: "dek-1a", Namespace: defaultTenantNamespace,
+				Name: "dek-1a", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.DataEncryptionKeySpec{
 					TenantNameRef: accountRef,
 					ServiceKeyRef: "sk-1",
@@ -157,7 +159,7 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 				},
 			},
 			&operationsv1alpha1.DataEncryptionKey{
-				Name: "dek-other", Namespace: defaultTenantNamespace,
+				Name: "dek-other", Namespace: testDefaultTenantNamespace,
 				Spec: operationsv1alpha1.DataEncryptionKeySpec{
 					TenantNameRef: accountRef,
 					ServiceKeyRef: "sk-2",
@@ -169,31 +171,30 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 
 	// Lifecycle clamp test: when parent is not Active, effective desired
 	// collapses to Deactivated regardless of spec.lifecycle.
-	if got := effectiveDesiredLifecycle(shared.DesiredLifecycleActive, shared.LifecycleActive); got != shared.DesiredLifecycleActive {
-		t.Fatalf("active parent + Active spec = %q, want Active", got)
-	}
-	if got := effectiveDesiredLifecycle(shared.DesiredLifecycleActive, shared.LifecycleDeactivated); got != shared.DesiredLifecycleDeactivated {
-		t.Fatalf("deactivated parent + Active spec = %q, want Deactivated", got)
-	}
-	if got := effectiveDesiredLifecycle(shared.DesiredLifecycleActive, shared.LifecycleSuspended); got != shared.DesiredLifecycleDeactivated {
-		t.Fatalf("suspended parent + Active spec = %q, want Deactivated (child≤parent)", got)
-	}
-	if got := effectiveDesiredLifecycle(shared.DesiredLifecycleActive, ""); got != shared.DesiredLifecycleDeactivated {
-		t.Fatalf("missing parent state + Active spec = %q, want Deactivated (clamp-to-safe)", got)
-	}
+	require.Equal(t, shared.DesiredLifecycleActive,
+		operations.EffectiveDesiredLifecycle(shared.DesiredLifecycleActive, shared.LifecycleActive),
+		"active parent + Active spec")
+	require.Equal(t, shared.DesiredLifecycleDeactivated,
+		operations.EffectiveDesiredLifecycle(shared.DesiredLifecycleActive, shared.LifecycleDeactivated),
+		"deactivated parent + Active spec")
+	require.Equal(t, shared.DesiredLifecycleDeactivated,
+		operations.EffectiveDesiredLifecycle(shared.DesiredLifecycleActive, shared.LifecycleSuspended),
+		"suspended parent + Active spec (child≤parent)")
+	require.Equal(t, shared.DesiredLifecycleDeactivated,
+		operations.EffectiveDesiredLifecycle(shared.DesiredLifecycleActive, ""),
+		"missing parent state + Active spec (clamp-to-safe)")
 
-	if err := cascadeDeactivateDomainKey(ctx, cl, defaultTenantNamespace, "dk-1"); err != nil {
-		t.Fatalf("cascadeDeactivateDomainKey: %v", err)
-	}
-	if err := cascadeDeactivateServiceKey(ctx, cl, defaultTenantNamespace, "sk-1"); err != nil {
-		t.Fatalf("cascadeDeactivateServiceKey: %v", err)
-	}
+	err := operations.CascadeDeactivateDomainKey(ctx, cl, testDefaultTenantNamespace, "dk-1")
+	require.NoError(t, err, "cascadeDeactivateDomainKey")
+	err = operations.CascadeDeactivateServiceKey(ctx, cl, testDefaultTenantNamespace, "sk-1")
+	require.NoError(t, err, "cascadeDeactivateServiceKey")
 
 	checks := []struct {
 		obj  string
 		want shared.DesiredLifecycle
 	}{
 		{"sk:sk-1", shared.DesiredLifecycleDeactivated},
+		{"sk:sk-3", shared.DesiredLifecycleDeactivated},
 		{"sk:sk-2", shared.DesiredLifecycleActive},
 		{"dek:dek-1a", shared.DesiredLifecycleDeactivated},
 		{"dek:dek-other", shared.DesiredLifecycleActive},
@@ -203,19 +204,15 @@ func TestCascadeDeactivateDomainKey_AndServiceKey(t *testing.T) {
 		switch c.obj[:3] {
 		case "sk:":
 			obj := &operationsv1alpha1.ServiceKey{}
-			if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: c.obj[3:]}, obj); err != nil {
-				t.Fatalf("get %s: %v", c.obj, err)
-			}
+			key := types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: c.obj[3:]}
+			require.NoErrorf(t, cl.Get(ctx, key, obj), "get %s", c.obj)
 			lc = obj.Spec.Lifecycle
 		case "dek":
 			obj := &operationsv1alpha1.DataEncryptionKey{}
-			if err := cl.Get(ctx, types.NamespacedName{Namespace: defaultTenantNamespace, Name: c.obj[4:]}, obj); err != nil {
-				t.Fatalf("get %s: %v", c.obj, err)
-			}
+			key := types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: c.obj[4:]}
+			require.NoErrorf(t, cl.Get(ctx, key, obj), "get %s", c.obj)
 			lc = obj.Spec.Lifecycle
 		}
-		if lc != c.want {
-			t.Fatalf("%s lifecycle = %q, want %q", c.obj, lc, c.want)
-		}
+		require.Equalf(t, c.want, lc, "%s lifecycle", c.obj)
 	}
 }

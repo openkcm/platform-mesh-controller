@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kryptongrpc
+package kryptongrpc_test
 
 import (
 	"context"
 	"net"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -42,9 +43,7 @@ func bufconnDial(t *testing.T, register func(*grpc.Server)) *grpc.ClientConn {
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	require.NoError(t, err, "dial")
 	t.Cleanup(func() {
 		_ = conn.Close()
 		srv.Stop()

@@ -1,10 +1,12 @@
-package mockapi
+package mockapi_test
 
 import (
-	"errors"
 	"net"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/openkcm/openkcm-controller/internal/mockapi"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -14,12 +16,10 @@ func startTestServer(t *testing.T) *openkcmapi.Client {
 	t.Setenv("POD_NAMESPACE", "")
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err, "listen")
 	t.Cleanup(func() { _ = listener.Close() })
 
-	server := NewServer(listener.Addr().String())
+	server := mockapi.NewServer(listener.Addr().String())
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
@@ -30,16 +30,10 @@ func TestCreateTenantAllowsDuplicateNames(t *testing.T) {
 	client := startTestServer(t)
 
 	first, err := client.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: "acme"})
-	if err != nil {
-		t.Fatalf("create first tenant: %v", err)
-	}
+	require.NoError(t, err, "create first tenant")
 	second, err := client.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: "acme"})
-	if err != nil {
-		t.Fatalf("create second tenant: %v", err)
-	}
-	if first.ID == second.ID {
-		t.Fatal("duplicate tenant creation returned the same ID")
-	}
+	require.NoError(t, err, "create second tenant")
+	require.NotEqual(t, first.ID, second.ID, "duplicate tenant creation returned the same ID")
 }
 
 func TestRootKeyLifecycleEndpoints(t *testing.T) {
@@ -47,9 +41,7 @@ func TestRootKeyLifecycleEndpoints(t *testing.T) {
 	ctx := t.Context()
 
 	tenant, err := client.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: "ig-clean-account"})
-	if err != nil {
-		t.Fatalf("create tenant: %v", err)
-	}
+	require.NoError(t, err, "create tenant")
 
 	root, err := client.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
 		TenantID: tenant.ID,
@@ -57,40 +49,23 @@ func TestRootKeyLifecycleEndpoints(t *testing.T) {
 		Name:     "ig-clean-account-root",
 		Config:   map[string]string{"enginePath": "transit"},
 	})
-	if err != nil {
-		t.Fatalf("create root key: %v", err)
-	}
-	if root.LifecycleState != lifecyclePreActive {
-		t.Fatalf("new root key lifecycle = %q, want %q", root.LifecycleState, lifecyclePreActive)
-	}
+	require.NoError(t, err, "create root key")
+	require.Equal(t, mockapi.LifecyclePreActive, root.LifecycleState, "new root key lifecycle")
 
 	activated, err := client.ActivateKey(ctx, root.ID)
-	if err != nil {
-		t.Fatalf("activate root key: %v", err)
-	}
-	if activated.LifecycleState != lifecycleActive {
-		t.Fatalf("activated lifecycle = %q, want %q", activated.LifecycleState, lifecycleActive)
-	}
+	require.NoError(t, err, "activate root key")
+	require.Equal(t, mockapi.LifecycleActive, activated.LifecycleState, "activated lifecycle")
 
 	suspended, err := client.SuspendKey(ctx, root.ID)
-	if err != nil {
-		t.Fatalf("suspend root key: %v", err)
-	}
-	if suspended.LifecycleState != lifecycleSuspended {
-		t.Fatalf("suspended lifecycle = %q, want %q", suspended.LifecycleState, lifecycleSuspended)
-	}
+	require.NoError(t, err, "suspend root key")
+	require.Equal(t, mockapi.LifecycleSuspended, suspended.LifecycleState, "suspended lifecycle")
 
 	destroyed, err := client.DestroyKey(ctx, root.ID)
-	if err != nil {
-		t.Fatalf("destroy root key: %v", err)
-	}
-	if destroyed.LifecycleState != lifecycleDestroyed {
-		t.Fatalf("destroyed lifecycle = %q, want %q", destroyed.LifecycleState, lifecycleDestroyed)
-	}
+	require.NoError(t, err, "destroy root key")
+	require.Equal(t, mockapi.LifecycleDestroyed, destroyed.LifecycleState, "destroyed lifecycle")
 
-	if _, err := client.ActivateKey(ctx, root.ID); err == nil {
-		t.Fatal("activate destroyed key: got nil error")
-	}
+	_, err = client.ActivateKey(ctx, root.ID)
+	require.Error(t, err, "activate destroyed key")
 }
 
 func TestDEKRequiresActiveServiceKey(t *testing.T) {
@@ -98,56 +73,41 @@ func TestDEKRequiresActiveServiceKey(t *testing.T) {
 	ctx := t.Context()
 
 	tenant, err := client.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: "ig-clean-account"})
-	if err != nil {
-		t.Fatalf("create tenant: %v", err)
-	}
+	require.NoError(t, err, "create tenant")
 	domain, err := client.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID,
 		Kind:     "L2",
 		Name:     "domain",
 	})
-	if err != nil {
-		t.Fatalf("create L2: %v", err)
-	}
-	if _, err := client.ActivateKey(ctx, domain.ID); err != nil {
-		t.Fatalf("activate L2: %v", err)
-	}
+	require.NoError(t, err, "create L2")
+	_, err = client.ActivateKey(ctx, domain.ID)
+	require.NoError(t, err, "activate L2")
 	service, err := client.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID,
 		Kind:     "L3",
 		Name:     "service",
 		ParentID: domain.ID,
 	})
-	if err != nil {
-		t.Fatalf("create L3: %v", err)
-	}
+	require.NoError(t, err, "create L3")
 
-	if _, err := client.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
+	_, err = client.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
 		TenantID:     tenant.ID,
 		ServiceKeyID: service.ID,
 		Name:         "workload",
-	}); err == nil {
-		t.Fatal("create DEK under inactive L3: got nil error")
-	} else {
-		var apiErr *openkcmapi.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "parent_not_active" {
-			t.Fatalf("create DEK under inactive L3 error = %v, want parent_not_active APIError", err)
-		}
-	}
+	})
+	require.Error(t, err, "create DEK under inactive L3")
+	var apiErr *openkcmapi.APIError
+	require.ErrorAs(t, err, &apiErr, "create DEK under inactive L3, want parent_not_active APIError")
+	require.Equal(t, "parent_not_active", apiErr.Code, "create DEK under inactive L3 error code")
 
-	if _, err := client.ActivateKey(ctx, service.ID); err != nil {
-		t.Fatalf("activate L3: %v", err)
-	}
+	_, err = client.ActivateKey(ctx, service.ID)
+	require.NoError(t, err, "activate L3")
 	dek, err := client.CreateDEK(ctx, openkcmapi.CreateDEKRequest{
 		TenantID:       tenant.ID,
 		ServiceKeyID:   service.ID,
 		Name:           "workload",
 		KMIPAttributes: map[string]string{"purpose": "test"},
 	})
-	if err != nil {
-		t.Fatalf("create DEK: %v", err)
-	}
-	if dek.LifecycleState != lifecyclePreActive {
-		t.Fatalf("new DEK lifecycle = %q, want %q", dek.LifecycleState, lifecyclePreActive)
-	}
+	require.NoError(t, err, "create DEK")
+	require.Equal(t, mockapi.LifecyclePreActive, dek.LifecycleState, "new DEK lifecycle")
 }

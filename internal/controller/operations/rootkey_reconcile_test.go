@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package operations
+package operations_test
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -39,7 +40,7 @@ const rootKeyReconciliationNamespace = "rootkey-reconciliation-specs"
 // provisioningBackend records key-provisioning calls while inheriting the
 // tenant call recording used by the existing reconciler test backend.
 type provisioningBackend struct {
-	fakeBackend
+	testBackend
 	rootKeyRequests []openkcmapi.CreateRootKeyRequest
 	dekRequests     []openkcmapi.CreateDEKRequest
 }
@@ -51,7 +52,7 @@ func (b *provisioningBackend) CreateRootKey(
 	b.mu.Lock()
 	b.rootKeyRequests = append(b.rootKeyRequests, req)
 	b.mu.Unlock()
-	return &openkcmapi.CreateRootKeyResponse{ID: "root-key-id", ProcessingState: processingStateReady}, nil
+	return &openkcmapi.CreateRootKeyResponse{ID: "root-key-id", ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
 
 func (b *provisioningBackend) CreateDEK(
@@ -61,7 +62,10 @@ func (b *provisioningBackend) CreateDEK(
 	b.mu.Lock()
 	b.dekRequests = append(b.dekRequests, req)
 	b.mu.Unlock()
-	return &openkcmapi.CreateDEKResponse{ID: "data-encryption-key-id", ProcessingState: processingStateReady}, nil
+	return &openkcmapi.CreateDEKResponse{
+		ID:              "data-encryption-key-id",
+		ProcessingState: openkcmapi.ProcessingStateReady,
+	}, nil
 }
 
 type rootKeyTestReconciler interface {
@@ -93,7 +97,7 @@ func ensureRootKeyReconciliationTenant(recorded bool) {
 	tenant.Name = testAccountName
 	tenant.Namespace = rootKeyReconciliationNamespace
 	if recorded {
-		tenant.Annotations = map[string]string{tenantIDAnnotation: testTenantID}
+		tenant.Annotations = map[string]string{operations.TenantIDAnnotation: testTenantID}
 	}
 	Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
 }
@@ -174,7 +178,7 @@ func rootKeyReconciliationCases() []any {
 		Entry("AWS", rootKeyReconciliationCase{
 			newRootKey: newAWSRootKeyForReconciliation,
 			newReconciler: func(backend *provisioningBackend) rootKeyTestReconciler {
-				return &AWSRootKeyReconciler{
+				return &operations.AWSRootKeyReconciler{
 					APIClient:        backend,
 					Manager:          newTestManager(),
 					AccountNamespace: rootKeyReconciliationNamespace,
@@ -188,7 +192,7 @@ func rootKeyReconciliationCases() []any {
 		Entry("Azure", rootKeyReconciliationCase{
 			newRootKey: newAzureRootKeyForReconciliation,
 			newReconciler: func(backend *provisioningBackend) rootKeyTestReconciler {
-				return &AzureRootKeyReconciler{
+				return &operations.AzureRootKeyReconciler{
 					APIClient:        backend,
 					Manager:          newTestManager(),
 					AccountNamespace: rootKeyReconciliationNamespace,
@@ -202,7 +206,7 @@ func rootKeyReconciliationCases() []any {
 		Entry("OpenBao", rootKeyReconciliationCase{
 			newRootKey: newOpenBaoRootKeyForReconciliation,
 			newReconciler: func(backend *provisioningBackend) rootKeyTestReconciler {
-				return &OpenBaoRootKeyReconciler{
+				return &operations.OpenBaoRootKeyReconciler{
 					APIClient:        backend,
 					Manager:          newTestManager(),
 					AccountNamespace: rootKeyReconciliationNamespace,
@@ -271,7 +275,7 @@ var _ = Describe("RootKeyReconciler", func() {
 				result, err := reconciler.Reconcile(ctx, requestFor(rootKey))
 				Expect(err).NotTo(HaveOccurred())
 
-				Expect(result.RequeueAfter).To(Equal(pollInterval))
+				Expect(result.RequeueAfter).To(Equal(operations.PollInterval))
 				Expect(backend.rootKeyRequests).To(BeEmpty())
 				createTenantCalls, _, _ := backend.counts()
 				Expect(createTenantCalls).To(BeZero())
@@ -279,7 +283,7 @@ var _ = Describe("RootKeyReconciler", func() {
 				Expect(k8sClient.Get(ctx, types.NamespacedName{
 					Name: rootKey.GetName(), Namespace: rootKey.GetNamespace(),
 				}, reloaded)).To(Succeed())
-				ready := meta.FindStatusCondition(testCase.statusConditions(reloaded), readyType)
+				ready := meta.FindStatusCondition(testCase.statusConditions(reloaded), operations.ReadyType)
 				Expect(ready).NotTo(BeNil())
 				Expect(ready.Reason).To(Equal("AwaitingTenant"))
 			},

@@ -14,19 +14,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kryptongrpc
+package kryptongrpc_test
 
 import (
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	kryptonadmin "github.com/openkcm/krypton/pkg/api/v1/proto/admin"
 
+	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
 )
 
@@ -57,8 +60,8 @@ func (s *stubTenantService) GetTenant(
 	return s.getFn(req)
 }
 
-func newClientAgainst(t *testing.T, stub *stubTenantService) *TenantClient {
-	return NewTenantClient(bufconnDial(t, func(s *grpc.Server) {
+func newClientAgainst(t *testing.T, stub *stubTenantService) *kryptongrpc.TenantClient {
+	return kryptongrpc.NewTenantClient(bufconnDial(t, func(s *grpc.Server) {
 		kryptonadmin.RegisterTenantServiceServer(s, stub)
 	}))
 }
@@ -79,19 +82,11 @@ func TestCreateTenantReturnsKryptonID(t *testing.T) {
 	resp, err := c.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: testTenantName})
 
 	// then
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if seen != testTenantName {
-		t.Errorf("name sent to krypton = %q, want %q", seen, testTenantName)
-	}
-	if resp.ID != testTenantID {
-		t.Errorf("ID = %q, want %q", resp.ID, testTenantID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, testTenantName, seen, "name sent to krypton")
+	assert.Equal(t, testTenantID, resp.ID, "ID")
 	// Krypton has no provisioning state, so a created tenant is ready at once.
-	if resp.ProcessingState != openkcmapi.ProcessingStateReady {
-		t.Errorf("ProcessingState = %q, want %q", resp.ProcessingState, openkcmapi.ProcessingStateReady)
-	}
+	assert.Equal(t, openkcmapi.ProcessingStateReady, resp.ProcessingState, "ProcessingState")
 }
 
 func TestCreateTenantRejectsEmptyResponse(t *testing.T) {
@@ -106,9 +101,7 @@ func TestCreateTenantRejectsEmptyResponse(t *testing.T) {
 	_, err := c.CreateTenant(t.Context(), openkcmapi.CreateTenantRequest{Name: "acme"})
 
 	// then
-	if err == nil {
-		t.Fatal("a response without a tenant must be an error, not a zero ID")
-	}
+	require.Error(t, err, "a response without a tenant must be an error, not a zero ID")
 }
 
 func TestCreateTenantTranslatesAlreadyExists(t *testing.T) {
@@ -124,15 +117,9 @@ func TestCreateTenantTranslatesAlreadyExists(t *testing.T) {
 
 	// then
 	var apiErr *openkcmapi.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("error must be classifiable as *openkcmapi.APIError, got %T: %v", err, err)
-	}
-	if apiErr.Code != codes.AlreadyExists.String() {
-		t.Errorf("Code = %q, want %q", apiErr.Code, codes.AlreadyExists.String())
-	}
-	if apiErr.StatusCode != 409 {
-		t.Errorf("StatusCode = %d, want 409", apiErr.StatusCode)
-	}
+	require.ErrorAs(t, err, &apiErr, "error must be classifiable as *openkcmapi.APIError")
+	assert.Equal(t, codes.AlreadyExists.String(), apiErr.Code, "Code")
+	assert.Equal(t, 409, apiErr.StatusCode, "StatusCode")
 }
 
 func TestGetTenantTranslatesNotFound(t *testing.T) {
@@ -148,12 +135,8 @@ func TestGetTenantTranslatesNotFound(t *testing.T) {
 
 	// then
 	var apiErr *openkcmapi.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("error must be classifiable as *openkcmapi.APIError, got %T: %v", err, err)
-	}
-	if apiErr.StatusCode != 404 {
-		t.Errorf("StatusCode = %d, want 404", apiErr.StatusCode)
-	}
+	require.ErrorAs(t, err, &apiErr, "error must be classifiable as *openkcmapi.APIError")
+	assert.Equal(t, 404, apiErr.StatusCode, "StatusCode")
 }
 
 func TestGetTenantReturnsID(t *testing.T) {
@@ -170,12 +153,8 @@ func TestGetTenantReturnsID(t *testing.T) {
 	resp, err := c.GetTenant(t.Context(), testTenantID)
 
 	// then
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != testTenantID {
-		t.Errorf("ID = %q, want %q", resp.ID, testTenantID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, testTenantID, resp.ID, "ID")
 }
 
 // TestClassifyCodeMatchesLiveKrypton pins the mapping to what a live Krypton
@@ -215,15 +194,9 @@ func TestClassifyCodeMatchesLiveKrypton(t *testing.T) {
 
 			// then
 			var apiErr *openkcmapi.APIError
-			if !errors.As(err, &apiErr) {
-				t.Fatalf("not classifiable: %v", err)
-			}
-			if apiErr.Kind() != tc.wantKind {
-				t.Errorf("Kind() = %v, want %v", apiErr.Kind(), tc.wantKind)
-			}
-			if openkcmapi.IsRetryable(err) != tc.wantRetry {
-				t.Errorf("IsRetryable = %v, want %v", openkcmapi.IsRetryable(err), tc.wantRetry)
-			}
+			require.ErrorAs(t, err, &apiErr, "not classifiable")
+			assert.Equal(t, tc.wantKind, apiErr.Kind(), "Kind()")
+			assert.Equal(t, tc.wantRetry, openkcmapi.IsRetryable(err), "IsRetryable")
 		})
 	}
 }
@@ -240,12 +213,8 @@ func TestNotFoundIsRecognisedByHelper(t *testing.T) {
 	_, err := c.GetTenant(t.Context(), "gone")
 
 	// then
-	if !openkcmapi.IsNotFound(err) {
-		t.Fatalf("IsNotFound must recognise a missing tenant, got %v", err)
-	}
-	if openkcmapi.IsRetryable(err) {
-		t.Error("a missing tenant must not be retried unchanged")
-	}
+	require.Truef(t, openkcmapi.IsNotFound(err), "IsNotFound must recognise a missing tenant, got %v", err)
+	assert.False(t, openkcmapi.IsRetryable(err), "a missing tenant must not be retried unchanged")
 }
 
 func TestDeleteTenantIsUnsupported(t *testing.T) {
@@ -256,7 +225,5 @@ func TestDeleteTenantIsUnsupported(t *testing.T) {
 	err := c.DeleteTenant(t.Context(), testTenantID)
 
 	// then
-	if !errors.Is(err, errors.ErrUnsupported) {
-		t.Fatalf("want errors.ErrUnsupported, got %v", err)
-	}
+	require.ErrorIs(t, err, errors.ErrUnsupported)
 }

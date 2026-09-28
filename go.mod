@@ -9,6 +9,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	github.com/openkcm/krypton v0.1.0
+	github.com/stretchr/testify v1.12.1
 	google.golang.org/grpc v1.83.0
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
@@ -87,7 +88,6 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
-	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/veqryn/slog-context v0.9.0 // indirect
 	github.com/veqryn/slog-context/otel v0.9.0 // indirect
