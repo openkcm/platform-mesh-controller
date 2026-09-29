@@ -32,8 +32,9 @@ openkcmAPI:
   url: "http://127.0.0.1:9443"
 
 krypton:
-  # host:port of Krypton's admin gRPC API. When empty, Tenant reconciliation
-  # keeps using the mock above; when set, it talks to Krypton instead.
+  # host:port of Krypton's admin gRPC API. When empty, Tenant, DomainKey and
+  # ServiceKey reconciliation keep using the mock above; when set, they talk to
+  # Krypton instead.
   #
   # Leave empty until the transport is settled: the client currently dials in
   # plaintext, while the showroom gateway expects a bearer token and has no

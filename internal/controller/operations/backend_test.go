@@ -37,7 +37,10 @@ type testBackend struct {
 	deleteTenantCalls []string
 
 	// noDelete makes DeleteTenant and DeleteKey answer like the Krypton client does.
-	noDelete bool
+	noDelete     bool
+	noDeactivate bool
+	deleteKeyErr error
+	keyLifecycle shared.LifecycleState
 
 	createKeyCalls   []openkcmapi.CreateKeyRequest
 	activateKeyCalls []string
@@ -49,7 +52,7 @@ type testBackend struct {
 }
 
 // testKeyID is what the test backend hands back for a created key.
-const testKeyID = "domain-key-uuid"
+const testKeyID = "key-uuid"
 
 func (f *testBackend) CreateTenant(
 	_ context.Context,
@@ -106,17 +109,25 @@ func (f *testBackend) CreateKey(
 	return &openkcmapi.CreateKeyResponse{ID: testKeyID, ProcessingState: openkcmapi.ProcessingStateReady}, nil
 }
 func (f *testBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
-	return &openkcmapi.GetKeyResponse{ID: id, ProcessingState: openkcmapi.ProcessingStateReady}, nil
+	f.mu.Lock()
+	lifecycle := f.keyLifecycle
+	f.mu.Unlock()
+	return &openkcmapi.GetKeyResponse{
+		ID:              id,
+		ProcessingState: openkcmapi.ProcessingStateReady,
+		LifecycleState:  string(lifecycle),
+	}, nil
 }
 func (f *testBackend) DeleteKey(_ context.Context, id string) error {
 	f.mu.Lock()
 	f.deleteKeyCalls = append(f.deleteKeyCalls, id)
 	noDelete := f.noDelete
+	deleteKeyErr := f.deleteKeyErr
 	f.mu.Unlock()
 	if noDelete {
 		return errors.ErrUnsupported
 	}
-	return nil
+	return deleteKeyErr
 }
 func (f *testBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
 	f.mu.Lock()
@@ -129,6 +140,12 @@ func (f *testBackend) ActivateKey(_ context.Context, id string) (*openkcmapi.Act
 	}, nil
 }
 func (f *testBackend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	f.mu.Lock()
+	noDeactivate := f.noDeactivate
+	f.mu.Unlock()
+	if noDeactivate {
+		return nil, errors.ErrUnsupported
+	}
 	return &openkcmapi.ActivateKeyResponse{
 		ID:             id,
 		LifecycleState: string(shared.LifecycleDeactivated),

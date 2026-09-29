@@ -137,6 +137,60 @@ func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 	assert.Equal(t, []string{"key-1"}, srv.activateSeen, "activated, want only the root key-1")
 }
 
+const testServiceKeyName = "acme.service"
+
+func TestBackendCreateKeyUnderParent(t *testing.T) {
+	// given
+	srv := newTestKeyServer()
+	b := newBackendAgainst(t, srv)
+	domain, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
+		TenantID: testKeyTenantID, Kind: "L2", Name: "acme.domain",
+	})
+	require.NoError(t, err, "CreateKey domain key")
+
+	// when
+	service, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
+		TenantID: testKeyTenantID, Kind: "L3", Name: testServiceKeyName, ParentID: domain.ID,
+	})
+
+	// then
+	require.NoError(t, err, "CreateKey service key")
+	assert.Equal(t, testKeyTenantID+"/key-3", service.ID, "packed id")
+	require.Len(t, srv.announceLog, 3, "announced keys, want root, domain and service")
+	assert.Equal(t, "K2", srv.announceLog[2].GetKind(), "service key kind")
+	assert.Equal(t, "key-2", srv.announceLog[2].GetParentId(), "service key parent")
+}
+
+func TestBackendRejectsMalformedParent(t *testing.T) {
+	// given
+	srv := newTestKeyServer()
+	b := newBackendAgainst(t, srv)
+
+	// when
+	_, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
+		TenantID: testKeyTenantID, Kind: "L3", Name: testServiceKeyName, ParentID: "no-separator",
+	})
+
+	// then
+	require.Error(t, err, "a parent id without a tenant must be rejected")
+	assert.Empty(t, srv.announceLog, "announced keys")
+}
+
+func TestBackendRejectsParentOfAnotherTenant(t *testing.T) {
+	// given
+	srv := newTestKeyServer()
+	b := newBackendAgainst(t, srv)
+
+	// when
+	_, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{
+		TenantID: testKeyTenantID, Kind: "L3", Name: testServiceKeyName, ParentID: "tenant-2/key-2",
+	})
+
+	// then
+	require.Error(t, err, "a parent from another tenant must be rejected")
+	assert.Empty(t, srv.announceLog, "announced keys")
+}
+
 func TestBackendReusesRootAcrossKeys(t *testing.T) {
 	// given a backend that already made one key
 	srv := newTestKeyServer()

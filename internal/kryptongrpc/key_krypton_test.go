@@ -27,6 +27,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	kryptonkeys "github.com/openkcm/krypton/pkg/api/v1/proto/admin/keys"
+
 	"github.com/openkcm/openkcm-controller/api/shared"
 	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
 	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
@@ -118,11 +120,34 @@ func TestBackendAgainstLiveKrypton(t *testing.T) {
 	require.NoError(t, err, "CreateKey")
 
 	// then the id carries the tenant and the key reads back and activates
-	_, _, err = kryptongrpc.UnpackKeyID(created.ID)
+	_, domainKeyID, err := kryptongrpc.UnpackKeyID(created.ID)
 	require.NoError(t, err, "returned id is not a packed handle")
 	_, err = b.GetKey(ctx, created.ID)
 	require.NoError(t, err, "GetKey")
 	act, err := b.ActivateKey(ctx, created.ID)
 	require.NoError(t, err, "ActivateKey")
 	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated domain key lifecycle")
+
+	// when a service key is created under it
+	serviceKeyRequest := openkcmapi.CreateKeyRequest{
+		TenantID: tenant.ID, Kind: "L3", Name: "service-" + tag, ParentID: created.ID,
+	}
+	service, err := b.CreateKey(ctx, serviceKeyRequest)
+	require.NoError(t, err, "CreateKey service key")
+
+	// then it lands under the domain key as K2 and activates
+	_, serviceKeyID, err := kryptongrpc.UnpackKeyID(service.ID)
+	require.NoError(t, err, "returned service key id is not a packed handle")
+	stored, err := kryptonkeys.NewKeyServiceClient(conn).GetKey(ctx, &kryptonkeys.GetKeyRequest{
+		Id: serviceKeyID, TenantId: tenant.ID,
+	})
+	require.NoError(t, err, "GetKey service key from Krypton")
+	assert.Equal(t, "K2", stored.GetKey().GetKind(), "service key kind")
+	assert.Equal(t, domainKeyID, stored.GetKey().GetParentId(), "service key parent")
+	retried, err := b.CreateKey(ctx, serviceKeyRequest)
+	require.NoError(t, err, "CreateKey service key again")
+	assert.Equal(t, service.ID, retried.ID, "retried service key id")
+	act, err = b.ActivateKey(ctx, service.ID)
+	require.NoError(t, err, "ActivateKey service key")
+	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated service key lifecycle")
 }
