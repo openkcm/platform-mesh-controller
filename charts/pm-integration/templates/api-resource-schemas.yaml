@@ -1584,9 +1584,8 @@ spec:
                 description: 'TypedReference is a polymorphic reference to a resource identified by
 
                   apiGroup + kind + namespace + name. Used where the referent kind varies
-                  (e.g.
 
-                  DomainKey.spec.primaryRootKeyRef accepts any L1 root-key kind).'
+                  (e.g. DomainKey.spec.primaryRootKeyRef accepts any L1 root-key kind).'
                 properties:
                   apiGroup:
                     description: APIGroup is the API group of the referenced resource.
@@ -1598,8 +1597,7 @@ spec:
                     description: Name is the name of the referenced resource.
                     type: string
                   namespace:
-                    description: 'Namespace is the namespace of the referenced resource. Empty
-                      keeps the
+                    description: 'Namespace is the namespace of the referenced resource. Empty keeps the
 
                       historical same-namespace behavior.'
                     type: string
@@ -1645,8 +1643,7 @@ spec:
                   description: Name is the name of the referenced resource.
                   type: string
                 namespace:
-                  description: 'Namespace is the namespace of the referenced resource. Empty
-                    keeps the
+                  description: 'Namespace is the namespace of the referenced resource. Empty keeps the
 
                     historical same-namespace behavior.'
                   type: string
@@ -1655,6 +1652,19 @@ spec:
               - kind
               - name
               type: object
+            scope:
+              default: Namespace
+              description: 'Scope limits the ServiceKeys under this DomainKey: an Instance DomainKey
+
+                serves exactly one ServiceKey, a Namespace DomainKey any number.'
+              enum:
+              - Instance
+              - Namespace
+              - System
+              type: string
+              x-kubernetes-validations:
+              - message: scope is immutable
+                rule: self == oldSelf
             tenantNameRef:
               description: 'TenantNameRef is the account-name of the owning Tenant. Advisory;
 
@@ -1663,7 +1673,7 @@ spec:
                 workspace path (showroom#203).'
               type: string
             type:
-              description: Type categorises the DomainKey scope.
+              description: Type categorises the DomainKey as a Team or a BusinessUnit key.
               enum:
               - Team
               - BusinessUnit
