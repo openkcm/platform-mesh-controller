@@ -19,14 +19,19 @@ package operations_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 	"github.com/openkcm/openkcm-controller/api/shared"
@@ -39,6 +44,7 @@ const (
 	serviceKeyName        = "service-key"
 	serviceKeyParentName  = "domain-key"
 	serviceKeyParentKeyID = "domain-key-id"
+	secondServiceKeyName  = "second-service-key"
 )
 
 func ensureServiceKeyNamespace() {
@@ -64,11 +70,22 @@ func newServiceKeyTenant(registered bool) {
 
 func newServiceKeyParent(lifecycle shared.LifecycleState) {
 	GinkgoHelper()
+	newScopedServiceKeyParent(lifecycle, operationsv1alpha1.DomainKeyScopeNamespace)
+}
+
+func newInstanceServiceKeyParent(lifecycle shared.LifecycleState) {
+	GinkgoHelper()
+	newScopedServiceKeyParent(lifecycle, operationsv1alpha1.DomainKeyScopeInstance)
+}
+
+func newScopedServiceKeyParent(lifecycle shared.LifecycleState, scope operationsv1alpha1.DomainKeyScope) {
+	GinkgoHelper()
 	domainKey := &operationsv1alpha1.DomainKey{}
 	domainKey.Name = serviceKeyParentName
 	domainKey.Namespace = serviceKeyNamespace
 	domainKey.Spec = operationsv1alpha1.DomainKeySpec{
 		Type:          testDomainKeyTypeTeam,
+		Scope:         scope,
 		TenantNameRef: testAccountName,
 	}
 	Expect(k8sClient.Create(ctx, domainKey)).To(Succeed())
@@ -78,8 +95,13 @@ func newServiceKeyParent(lifecycle shared.LifecycleState) {
 
 func newServiceKey() *operationsv1alpha1.ServiceKey {
 	GinkgoHelper()
+	return newServiceKeyNamed(serviceKeyName)
+}
+
+func newServiceKeyNamed(name string) *operationsv1alpha1.ServiceKey {
+	GinkgoHelper()
 	serviceKey := &operationsv1alpha1.ServiceKey{}
-	serviceKey.Name = serviceKeyName
+	serviceKey.Name = name
 	serviceKey.Namespace = serviceKeyNamespace
 	serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{
 		TenantNameRef: testAccountName,
@@ -214,6 +236,58 @@ var _ = Describe("ServiceKeyReconciler", func() {
 		Expect(ready.Reason).To(Equal("LifecycleTransitionFailed"))
 	})
 
+	It("gives an Instance domain key to one service key only", func() {
+		// given
+		newServiceKeyTenant(true)
+		newInstanceServiceKeyParent(shared.LifecycleActive)
+		drive(reconciler, newServiceKey(), 3)
+		second := newServiceKeyNamed(secondServiceKeyName)
+
+		// when
+		drive(reconciler, second, 3)
+
+		// then
+		Expect(backend.createKeyCalls).To(HaveLen(1))
+		reloaded := &operationsv1alpha1.ServiceKey{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(second), reloaded)).To(Succeed())
+		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Reason).To(Equal(operations.ReasonDomainKeyInUse))
+	})
+
+	It("hands an Instance domain key to the next service key once the first is deleted", func() {
+		// given
+		newServiceKeyTenant(true)
+		newInstanceServiceKeyParent(shared.LifecycleActive)
+		first := newServiceKey()
+		drive(reconciler, first, 3)
+		second := newServiceKeyNamed(secondServiceKeyName)
+		drive(reconciler, second, 2)
+		Expect(k8sClient.Delete(ctx, reloadServiceKey())).To(Succeed())
+		drive(reconciler, first, 1)
+
+		// when
+		drive(reconciler, second, 2)
+
+		// then
+		Expect(backend.createKeyCalls).To(HaveLen(2))
+		Expect(backend.createKeyCalls[1].Name).To(Equal(operations.ServiceKeyOpenKCMName(second)))
+	})
+
+	It("lets a Namespace domain key serve many service keys", func() {
+		// given
+		newServiceKeyTenant(true)
+		newServiceKeyParent(shared.LifecycleActive)
+		drive(reconciler, newServiceKey(), 3)
+		second := newServiceKeyNamed(secondServiceKeyName)
+
+		// when
+		drive(reconciler, second, 3)
+
+		// then
+		Expect(backend.createKeyCalls).To(HaveLen(2))
+	})
+
 	It("waits while its domain key is not active", func() {
 		// given
 		newServiceKeyTenant(true)
@@ -304,4 +378,126 @@ func TestServiceKeyOpenKCMNameIsUniquePerTenant(t *testing.T) {
 	assert.Equal(t, "servicekey:team-a.payments", name)
 	assert.NotEqual(t, operations.DomainKeyOpenKCMName(domainKey), name, "domain key of the same name")
 	assert.NotEqual(t, operations.ServiceKeyOpenKCMName(elsewhere), name, "service key of the same name elsewhere")
+}
+
+func TestInstanceDomainKeyTakenBy(t *testing.T) {
+	const orders, billing, ordersKeyID = "orders", "billing", "orders-key"
+	instance := &operationsv1alpha1.DomainKey{
+		Name:      "orders-db",
+		Namespace: serviceKeyNamespace,
+		Spec:      operationsv1alpha1.DomainKeySpec{Scope: operationsv1alpha1.DomainKeyScopeInstance},
+	}
+	namespaced := &operationsv1alpha1.DomainKey{
+		Name:      "team",
+		Namespace: serviceKeyNamespace,
+		Spec:      operationsv1alpha1.DomainKeySpec{Scope: operationsv1alpha1.DomainKeyScopeNamespace},
+	}
+	unscoped := &operationsv1alpha1.DomainKey{Name: "legacy", Namespace: serviceKeyNamespace}
+	serviceKey := func(
+		name string, dk *operationsv1alpha1.DomainKey, day int, keyID string,
+	) *operationsv1alpha1.ServiceKey {
+		sk := &operationsv1alpha1.ServiceKey{
+			Name:              name,
+			Namespace:         serviceKeyNamespace,
+			CreationTimestamp: metav1.Date(2026, 1, day, 0, 0, 0, 0, time.UTC),
+			Spec:              operationsv1alpha1.ServiceKeySpec{DomainKeyRef: dk.Name},
+		}
+		if keyID != "" {
+			sk.Status.CryptoState = &shared.CryptoState{ID: keyID}
+		}
+		return sk
+	}
+	deleted := metav1.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	leaving := serviceKey(orders, instance, 1, ordersKeyID)
+	leaving.DeletionTimestamp = &deleted
+	leaving.Finalizers = []string{operations.ServiceKeyFinalizer}
+
+	cases := []struct {
+		name  string
+		dk    *operationsv1alpha1.DomainKey
+		skeys []*operationsv1alpha1.ServiceKey
+		asks  string
+		want  string
+	}{
+		{
+			name: "the ServiceKey that already has its key keeps an Instance DomainKey",
+			dk:   instance,
+			skeys: []*operationsv1alpha1.ServiceKey{
+				serviceKey(orders, instance, 2, ordersKeyID),
+				serviceKey(billing, instance, 1, ""),
+			},
+			asks: billing,
+			want: orders,
+		},
+		{
+			name: "the oldest ServiceKey wins while none has a key",
+			dk:   instance,
+			skeys: []*operationsv1alpha1.ServiceKey{
+				serviceKey(orders, instance, 1, ""),
+				serviceKey(billing, instance, 2, ""),
+			},
+			asks: billing,
+			want: orders,
+		},
+		{
+			name: "the winner itself is free to go on",
+			dk:   instance,
+			skeys: []*operationsv1alpha1.ServiceKey{
+				serviceKey(orders, instance, 1, ""),
+				serviceKey(billing, instance, 2, ""),
+			},
+			asks: orders,
+			want: "",
+		},
+		{
+			name:  "a ServiceKey being deleted frees the Instance DomainKey",
+			dk:    instance,
+			skeys: []*operationsv1alpha1.ServiceKey{leaving, serviceKey(billing, instance, 2, "")},
+			asks:  billing,
+			want:  "",
+		},
+		{
+			name: "a Namespace DomainKey serves every ServiceKey",
+			dk:   namespaced,
+			skeys: []*operationsv1alpha1.ServiceKey{
+				serviceKey(orders, namespaced, 1, ordersKeyID),
+				serviceKey(billing, namespaced, 2, ""),
+			},
+			asks: billing,
+			want: "",
+		},
+		{
+			name: "a DomainKey without a scope serves every ServiceKey",
+			dk:   unscoped,
+			skeys: []*operationsv1alpha1.ServiceKey{
+				serviceKey(orders, unscoped, 1, ordersKeyID),
+				serviceKey(billing, unscoped, 2, ""),
+			},
+			asks: billing,
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// given
+			scheme := runtime.NewScheme()
+			require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+			builder := fake.NewClientBuilder().WithScheme(scheme)
+			var asking *operationsv1alpha1.ServiceKey
+			for _, sk := range tc.skeys {
+				builder = builder.WithObjects(sk.DeepCopy())
+				if sk.Name == tc.asks {
+					asking = sk
+				}
+			}
+			cl := builder.Build()
+
+			// when
+			got, err := operations.InstanceDomainKeyTakenBy(t.Context(), cl, asking, tc.dk)
+
+			// then
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }

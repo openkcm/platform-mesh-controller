@@ -21,8 +21,10 @@ const (
 	PathAnnotation          = pathAnnotation
 	PollInterval            = pollInterval
 	ReadyType               = readyType
+	ReasonDomainKeyInUse    = reasonDomainKeyInUse
 	ReasonFailed            = reasonFailed
 	ReasonProcess           = reasonProcess
+	ServiceKeyFinalizer     = serviceKeyFinalizer
 	TenantFinalizer         = tenantFinalizer
 	TenantIDAnnotation      = tenantIDAnnotation
 )
@@ -44,6 +46,7 @@ var (
 	EnsureDomainKey                    = (*AccountBootstrapReconciler).ensureDomainKey
 	EnsureTenant                       = (*AccountBootstrapReconciler).ensureTenant
 	FindEarlierDomainKey               = (*DomainKeyReconciler).findEarlierDomainKey
+	InstanceDomainKeyTakenBy           = instanceDomainKeyTakenBy
 	IsOperationsAPIBinding             = isOperationsAPIBinding
 	PrimaryRootKeyLifecycle            = (*DomainKeyReconciler).primaryRootKeyLifecycle
 	ResolvePrimaryRootKey              = (*DomainKeyReconciler).resolvePrimaryRootKey
