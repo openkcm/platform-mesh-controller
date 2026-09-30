@@ -35,6 +35,7 @@ var (
 	CascadeDeactivateDomainKey         = cascadeDeactivateDomainKey
 	CascadeDeactivateRootKey           = cascadeDeactivateRootKey
 	CascadeDeactivateServiceKey        = cascadeDeactivateServiceKey
+	DataEncryptionKeyOpenKCMName       = dataEncryptionKeyOpenKCMName
 	DefaultAccountNamespace            = defaultAccountNamespace
 	DomainKeyOpenKCMName               = domainKeyOpenKCMName
 	EffectiveDesiredLifecycle          = effectiveDesiredLifecycle

@@ -95,7 +95,7 @@ func main() {
 	flag.StringVar(&kryptonAddr,
 		"krypton-grpc-addr",
 		"",
-		"Krypton admin gRPC address (host:port). When set, Tenant, DomainKey and ServiceKey "+
+		"Krypton admin gRPC address (host:port). When set, Tenant, DomainKey, ServiceKey and DataEncryptionKey "+
 			"reconciliation talk to Krypton instead of the OpenKCM HTTP API. The "+
 			"connection is currently plaintext: transport security for the showroom "+
 			"gateway is unresolved.",
@@ -188,11 +188,12 @@ func main() {
 
 	apiClient := openkcmapi.NewClient(openkcmAPIURL)
 
-	// Tenant, DomainKey and ServiceKey are the slices moved onto Krypton's real gRPC API.
+	// Tenant, DomainKey, ServiceKey and DataEncryptionKey are the slices moved onto Krypton's real gRPC API.
 	// Every other reconciler still speaks the mock's HTTP surface, so both
 	// clients coexist until each slice is migrated in turn.
 	var tenantBackend operationscontroller.TenantBackend = apiClient
 	var keyBackend operationscontroller.KeyBackend = apiClient
+	var dataEncryptionKeyBackend operationscontroller.DataEncryptionKeyBackend = apiClient
 	if kryptonAddr != "" {
 		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
@@ -201,8 +202,11 @@ func main() {
 		}
 		defer func() { _ = conn.Close() }()
 		tenantBackend = kryptongrpc.NewTenantClient(conn)
-		keyBackend = kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
-		setupLog.Info("Tenant, DomainKey and ServiceKey reconciliation bound to Krypton", "addr", kryptonAddr)
+		kryptonBackend := kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
+		keyBackend = kryptonBackend
+		dataEncryptionKeyBackend = kryptonBackend
+		setupLog.Info("Tenant, DomainKey, ServiceKey and DataEncryptionKey reconciliation bound to Krypton",
+			"addr", kryptonAddr)
 	}
 
 	kcpCfg, err := clientcmd.BuildConfigFromFlags("", kcpKubeconfig)
@@ -309,7 +313,7 @@ func main() {
 	}
 
 	if err := (&operationscontroller.DataEncryptionKeyReconciler{
-		APIClient:        apiClient,
+		APIClient:        dataEncryptionKeyBackend,
 		AccountNamespace: tenantNamespace,
 	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "DataEncryptionKey")

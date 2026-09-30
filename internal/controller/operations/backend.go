@@ -35,23 +35,30 @@ import (
 type Backend interface {
 	KeyBackend
 	TenantBackend
+	DataEncryptionKeyBackend
 
 	CreateRootKey(ctx context.Context, req openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error)
 	GetRootKey(ctx context.Context, id string) (*openkcmapi.GetRootKeyResponse, error)
 	DeleteRootKey(ctx context.Context, id string) error
-
-	CreateDEK(ctx context.Context, req openkcmapi.CreateDEKRequest) (*openkcmapi.CreateDEKResponse, error)
-	GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResponse, error)
-	DeleteDEK(ctx context.Context, id string) error
 }
 
 // KeyBackend is the slice the DomainKey and ServiceKey reconcilers drive. It is
-// separate so they can bind to a Krypton-backed client that has no root-key or
-// DEK support yet. Tenant identity is read from the Tenant CR, not created here.
+// separate so they can bind to a Krypton-backed client that has no root-key
+// support yet. Tenant identity is read from the Tenant CR, not created here.
 type KeyBackend interface {
 	CreateKey(ctx context.Context, req openkcmapi.CreateKeyRequest) (*openkcmapi.CreateKeyResponse, error)
 	GetKey(ctx context.Context, id string) (*openkcmapi.GetKeyResponse, error)
 	DeleteKey(ctx context.Context, id string) error
+
+	ActivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
+	DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
+}
+
+// DataEncryptionKeyBackend is the slice the DataEncryptionKey reconciler drives.
+type DataEncryptionKeyBackend interface {
+	CreateDEK(ctx context.Context, req openkcmapi.CreateDEKRequest) (*openkcmapi.CreateDEKResponse, error)
+	GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResponse, error)
+	DeleteDEK(ctx context.Context, id string) error
 
 	ActivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)
 	DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error)

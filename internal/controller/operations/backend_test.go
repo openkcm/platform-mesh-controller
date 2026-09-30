@@ -166,9 +166,17 @@ func (f *testBackend) CreateDEK(
 ) (*openkcmapi.CreateDEKResponse, error) {
 	return &openkcmapi.CreateDEKResponse{}, nil
 }
-func (f *testBackend) GetDEK(context.Context, string) (*openkcmapi.GetDEKResponse, error) {
-	return &openkcmapi.GetDEKResponse{}, nil
+func (f *testBackend) GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResponse, error) {
+	key, err := f.GetKey(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &openkcmapi.GetDEKResponse{
+		ID:              key.ID,
+		ProcessingState: key.ProcessingState,
+		LifecycleState:  key.LifecycleState,
+	}, nil
 }
-func (f *testBackend) DeleteDEK(context.Context, string) error { return nil }
+func (f *testBackend) DeleteDEK(ctx context.Context, id string) error { return f.DeleteKey(ctx, id) }
 
 var _ operations.Backend = (*testBackend)(nil)
