@@ -171,6 +171,20 @@ var _ = Describe("DomainKeyReconciler", func() {
 		cleanupDomainKeyObject(&operationsv1alpha1.Tenant{}, testAccountName)
 	})
 
+	It("rejects a change of scope", func() {
+		// given
+		dk := newDomainKey("")
+		reloaded := reloadDomainKey(dk.Name)
+		reloaded.Spec.Scope = operationsv1alpha1.DomainKeyScopeInstance
+
+		// when
+		err := k8sClient.Update(ctx, reloaded)
+
+		// then
+		Expect(apierrors.IsInvalid(err)).To(BeTrue())
+		Expect(err).To(MatchError(ContainSubstring("scope is immutable")))
+	})
+
 	It("adds the finalizer before touching the backend", func() {
 		ensureRegisteredTenant()
 		root := newActiveRootKey()

@@ -43,6 +43,7 @@ const (
 	// A service key sits one tier below the domain key it hangs off.
 	serviceKeyKind       = "L3"
 	serviceKeyNamePrefix = "servicekey:"
+	reasonDomainKeyInUse = "DomainKeyInUse"
 )
 
 // ServiceKeyReconciler reconciles a ServiceKey object across KCP workspaces.
@@ -211,6 +212,16 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey, dk *operationsv1alpha1.DomainKey) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	takenBy, err := instanceDomainKeyTakenBy(ctx, cl, sk, dk)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if takenBy != "" {
+		r.setFailedCondition(ctx, cl, sk, reasonDomainKeyInUse,
+			fmt.Sprintf("Instance DomainKey %q already serves ServiceKey %q", dk.Name, takenBy))
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+
 	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
@@ -266,6 +277,44 @@ func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.C
 
 func serviceKeyOpenKCMName(sk *operationsv1alpha1.ServiceKey) string {
 	return serviceKeyNamePrefix + sk.Namespace + "." + sk.Name
+}
+
+func instanceDomainKeyTakenBy(
+	ctx context.Context,
+	cl client.Client,
+	sk *operationsv1alpha1.ServiceKey,
+	dk *operationsv1alpha1.DomainKey,
+) (string, error) {
+	if dk.Spec.Scope != operationsv1alpha1.DomainKeyScopeInstance {
+		return "", nil
+	}
+	sks := &operationsv1alpha1.ServiceKeyList{}
+	if err := cl.List(ctx, sks, client.InNamespace(sk.Namespace)); err != nil {
+		return "", err
+	}
+	holder := sk
+	for i := range sks.Items {
+		other := &sks.Items[i]
+		if other.Spec.DomainKeyRef == dk.Name && other.DeletionTimestamp.IsZero() && servesBefore(other, holder) {
+			holder = other
+		}
+	}
+	if holder.Name == sk.Name {
+		return "", nil
+	}
+	return holder.Name, nil
+}
+
+func servesBefore(a, b *operationsv1alpha1.ServiceKey) bool {
+	aHasKey := a.Status.CryptoState != nil && a.Status.CryptoState.ID != ""
+	bHasKey := b.Status.CryptoState != nil && b.Status.CryptoState.ID != ""
+	if aHasKey != bHasKey {
+		return aHasKey
+	}
+	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
+		return a.CreationTimestamp.Before(&b.CreationTimestamp)
+	}
+	return a.Name < b.Name
 }
 
 func (r *ServiceKeyReconciler) ensureParentDomainKeyLink(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey) (bool, ctrl.Result, error) {

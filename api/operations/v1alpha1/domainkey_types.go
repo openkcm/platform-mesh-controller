@@ -22,16 +22,33 @@ import (
 	"github.com/openkcm/openkcm-controller/api/shared"
 )
 
+// DomainKeyScope says which ServiceKeys a DomainKey serves.
+// +kubebuilder:validation:Enum=Instance;Namespace;System
+type DomainKeyScope string
+
+const (
+	DomainKeyScopeInstance  DomainKeyScope = "Instance"
+	DomainKeyScopeNamespace DomainKeyScope = "Namespace"
+	DomainKeyScopeSystem    DomainKeyScope = "System"
+)
+
 // DomainKeySpec defines the desired state of DomainKey (L2).
 //
 // DomainKey establishes the hierarchical link from a Tenant down to the
 // upstream KMS via a polymorphic primaryRootKeyRef pointing at an L1
 // root-key kind (AWS/Azure/OpenBao/GCP/Vault/HSM).
 type DomainKeySpec struct {
-	// Type categorises the DomainKey scope.
+	// Type categorises the DomainKey as a Team or a BusinessUnit key.
 	// +kubebuilder:validation:Enum=Team;BusinessUnit
 	// +required
 	Type string `json:"type"`
+
+	// Scope limits the ServiceKeys under this DomainKey: an Instance DomainKey
+	// serves exactly one ServiceKey, a Namespace DomainKey any number.
+	// +kubebuilder:default=Namespace
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="scope is immutable"
+	// +optional
+	Scope DomainKeyScope `json:"scope,omitempty"`
 
 	// TenantNameRef is the account-name of the owning Tenant. Advisory;
 	// the reconciler derives the canonical tenant identity from the
