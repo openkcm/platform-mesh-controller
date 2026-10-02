@@ -343,7 +343,7 @@ func ensureAutoDomainKeyForNamespace(ctx context.Context, cl client.Client, acco
 	existing := &operationsv1alpha1.DomainKey{}
 	err = cl.Get(ctx, types.NamespacedName{Namespace: namespace, Name: domainKeyName}, existing)
 	if apierrors.IsNotFound(err) {
-		occupied, err := namespaceHasDomainKey(ctx, cl, namespace)
+		occupied, err := hasNamespaceDomainKey(ctx, cl, namespace)
 		if err != nil {
 			return err
 		}
@@ -393,13 +393,13 @@ func defaultAccountNamespace(namespace string) string {
 	return namespace
 }
 
-func namespaceHasDomainKey(ctx context.Context, cl client.Client, namespace string) (bool, error) {
+func hasNamespaceDomainKey(ctx context.Context, cl client.Client, namespace string) (bool, error) {
 	dks := &operationsv1alpha1.DomainKeyList{}
 	if err := cl.List(ctx, dks, client.InNamespace(namespace)); err != nil {
 		return false, err
 	}
 	for i := range dks.Items {
-		if dks.Items[i].DeletionTimestamp.IsZero() {
+		if dks.Items[i].DeletionTimestamp.IsZero() && isNamespaceDomainKey(&dks.Items[i]) {
 			return true, nil
 		}
 	}

@@ -74,15 +74,15 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 		return r.handleDeletion(ctx, cl, dk)
 	}
 
-	// Singleton constraint: only one DomainKey per account workspace. If a
-	// DomainKey with an earlier creationTimestamp (or, on tie, a name that
-	// sorts earlier) already exists, this one is rejected without
+	// Singleton constraint: only one Namespace DomainKey per namespace. If a
+	// Namespace DomainKey with an earlier creationTimestamp (or, on tie, a name
+	// that sorts earlier) already exists, this one is rejected without
 	// progressing. The earlier resource keeps reconciling normally.
 	if earlier, err := r.findEarlierDomainKey(ctx, cl, dk); err != nil {
 		return ctrl.Result{}, err
 	} else if earlier != nil {
 		r.setFailedCondition(ctx, cl, dk, "DomainKeyLimitExceeded",
-			fmt.Sprintf("Only one DomainKey is allowed per account; %q already exists.", earlier.Name))
+			fmt.Sprintf("Only one Namespace DomainKey is allowed per namespace; %q already exists.", earlier.Name))
 		return ctrl.Result{}, nil
 	}
 
@@ -453,23 +453,26 @@ func (r *DomainKeyReconciler) clusterClient(ctx context.Context, clusterName str
 	return cluster.GetClient(), nil
 }
 
-// findEarlierDomainKey returns the DomainKey in the same namespace that
+// findEarlierDomainKey returns the Namespace DomainKey in the same namespace that
 // should "win" the singleton slot — the one created earliest, with the
 // lexicographically-smaller name as a deterministic tiebreaker. Returns
-// (nil, nil) if dk itself is the winner. DomainKeys marked for deletion
-// are ignored.
+// (nil, nil) if dk itself is the winner or is not a Namespace DomainKey.
+// DomainKeys marked for deletion are ignored.
 func (r *DomainKeyReconciler) findEarlierDomainKey(
 	ctx context.Context,
 	cl client.Client,
 	dk *operationsv1alpha1.DomainKey,
 ) (*operationsv1alpha1.DomainKey, error) {
+	if !isNamespaceDomainKey(dk) {
+		return nil, nil
+	}
 	others := &operationsv1alpha1.DomainKeyList{}
 	if err := cl.List(ctx, others, client.InNamespace(dk.Namespace)); err != nil {
 		return nil, err
 	}
 	for i := range others.Items {
 		other := &others.Items[i]
-		if other.Name == dk.Name {
+		if other.Name == dk.Name || !isNamespaceDomainKey(other) {
 			continue
 		}
 		if !other.DeletionTimestamp.IsZero() {
@@ -488,6 +491,11 @@ func (r *DomainKeyReconciler) findEarlierDomainKey(
 		}
 	}
 	return nil, nil
+}
+
+func isNamespaceDomainKey(dk *operationsv1alpha1.DomainKey) bool {
+	// Scope is empty when the served schema predates the field.
+	return dk.Spec.Scope == "" || dk.Spec.Scope == operationsv1alpha1.DomainKeyScopeNamespace
 }
 
 func (r *DomainKeyReconciler) setFailedCondition(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey, reason, message string) {
