@@ -48,7 +48,7 @@ const (
 // ServiceKeyReconciler reconciles a ServiceKey object across KCP workspaces.
 //
 // In v0.7.0 the spec dropped the `activate` boolean. ServiceKey lifecycle
-// now mirrors whatever OpenKCM reports — the reconciler creates the key,
+// now mirrors whatever OpenKCM reports - the reconciler creates the key,
 // activates it once material is ready, and reflects the six-value lifecycle
 // (PreActive|Active|Suspended|Deactivated|Compromised|Destroyed) back into
 // status as OpenKCM transitions it.
@@ -121,7 +121,7 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 
 	// If we already have an existing ServiceKey (PreActive or Active), allow
 	// the lifecycle reconcile path even when the parent DomainKey is not
-	// Active — a deactivated parent should still let us deactivate this SK.
+	// Active - a deactivated parent should still let us deactivate this SK.
 	if domainKeyState != shared.LifecycleActive && (sk.Status.CryptoState == nil || sk.Status.CryptoState.ID == "") {
 		logger.Info("DomainKey not yet active, requeuing", "domainKey", dk.Name)
 		r.setFailedCondition(ctx, cl, sk, "DomainKeyNotActive",
@@ -129,12 +129,12 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
-	// Step 1: new ServiceKey — register tenant + create L3 key.
+	// Step 1: new ServiceKey - register tenant + create L3 key.
 	if sk.Status.CryptoState == nil || sk.Status.CryptoState.ID == "" {
 		return r.createServiceKey(ctx, cl, sk, dk)
 	}
 
-	// Step 2: key exists — drive to Active. Lifecycle is owned by OpenKCM;
+	// Step 2: key exists - drive to Active. Lifecycle is owned by OpenKCM;
 	// reflect whatever the backend reports and trigger activation while
 	// the state is PreActive.
 	keyID := sk.Status.CryptoState.ID

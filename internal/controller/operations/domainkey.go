@@ -112,7 +112,7 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 
 	// If the DomainKey already exists (has a Krypton key id) and is
 	// transitioning to Deactivated (either by user or by L1 cascade), skip
-	// the Active-L1 validation that resolvePrimaryRootKey enforces — we
+	// the Active-L1 validation that resolvePrimaryRootKey enforces - we
 	// don't need an Active parent to deactivate ourselves.
 	skipResolveCheck := dk.Status.CryptoState != nil && dk.Status.CryptoState.ID != "" &&
 		effectiveDesired == shared.DesiredLifecycleDeactivated
@@ -126,7 +126,7 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 		}
 	}
 
-	// Step 1: new DomainKey — register tenant + create L2 key.
+	// Step 1: new DomainKey - register tenant + create L2 key.
 	if dk.Status.CryptoState == nil || dk.Status.CryptoState.ID == "" {
 		return r.createDomainKey(ctx, cl, dk)
 	}
@@ -267,7 +267,7 @@ func domainKeyOpenKCMName(dk *operationsv1alpha1.DomainKey) string {
 }
 
 // activatePreActiveDomainKey is Step 2: drive PreActive → Active once
-// Krypton reports the key is ready. Returns (result, done, err) — when
+// Krypton reports the key is ready. Returns (result, done, err) - when
 // done=true the caller should return immediately; otherwise the function
 // has updated the in-memory status and the caller should continue with
 // Step 3 (lifecycle reconcile).
@@ -484,7 +484,7 @@ func (r *DomainKeyReconciler) findEarlierDomainKey(
 		case dk.CreationTimestamp.Before(&other.CreationTimestamp):
 			continue
 		default:
-			// Same creationTimestamp — deterministic tiebreaker by name.
+			// Same creationTimestamp - deterministic tiebreaker by name.
 			if other.Name < dk.Name {
 				return other, nil
 			}

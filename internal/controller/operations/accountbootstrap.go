@@ -44,14 +44,14 @@ import (
 //
 // v0.9.1 revisits the v0.7.3 "Tenant-only" choice. Since v0.8.5 enforces L2
 // singleton and v0.9.1 makes primaryRootKeyRef optional, the bootstrap can
-// safely create the singleton DomainKey without a primary L1 attached — the
+// safely create the singleton DomainKey without a primary L1 attached - the
 // DomainKey reconciler will sit in Ready=False/AwaitingPrimaryRootKey until
 // the user registers a Root Key and edits the DomainKey to link it (via the
 // Edit affordance in the EncryptionDomainCard).
 type AccountBootstrapReconciler struct {
 	Manager mcmanager.Manager
 
-	// Defaults applied when minting a new Tenant CR. Optional — if all
+	// Defaults applied when minting a new Tenant CR. Optional - if all
 	// empty, the Tenant ships with no OIDCProvider block (the v0.7.0
 	// schema makes oidcProvider optional).
 	DefaultRegion        string
@@ -110,7 +110,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	if err != nil {
 		// Workspaces that are mid-deletion lose their LogicalCluster before
 		// their APIBindings finish draining. Treat NotFound as "skip", not
-		// "error" — there's nothing to bootstrap in a workspace that's
+		// "error" - there's nothing to bootstrap in a workspace that's
 		// going away.
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("LogicalCluster missing; workspace is likely terminating, skipping", "binding", binding.Name)
@@ -130,7 +130,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	// provider-syncagent typically lacks cluster-scope rights to create
 	// namespaces in fresh account workspaces; that's OK as long as
 	// "default" already exists (which is the common case under KCP).
-	// Ignore AlreadyExists and Forbidden — if the namespace genuinely
+	// Ignore AlreadyExists and Forbidden - if the namespace genuinely
 	// doesn't exist, the subsequent Tenant/DomainKey create will return
 	// a clear error.
 	ns := &corev1.Namespace{Name: namespace}
@@ -191,7 +191,7 @@ func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client
 
 // ensureDomainKey idempotently creates the singleton Encryption Domain
 // (L2 DomainKey) for this account. The auto-created DomainKey ships
-// with no primaryRootKeyRef — DomainKeyReconciler sits in
+// with no primaryRootKeyRef - DomainKeyReconciler sits in
 // Ready=False/AwaitingPrimaryRootKey until the user links a Root Key
 // via the Edit affordance in the OpenKCM UI.
 func (r *AccountBootstrapReconciler) ensureDomainKey(ctx context.Context, cl client.Client, namespace, accountName string) error {
@@ -213,7 +213,7 @@ func (r *AccountBootstrapReconciler) ensureDomainKey(ctx context.Context, cl cli
 		Spec: operationsv1alpha1.DomainKeySpec{
 			Type:          domainKeyTypeTeam,
 			TenantNameRef: accountName,
-			// PrimaryRootKeyRef intentionally left nil — user links it later.
+			// PrimaryRootKeyRef intentionally left nil - user links it later.
 		},
 	}
 	if err := cl.Create(ctx, dk); err != nil {
