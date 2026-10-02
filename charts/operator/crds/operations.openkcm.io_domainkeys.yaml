@@ -149,8 +149,7 @@ spec:
                   workspace path (showroom#203).
                 type: string
               type:
-                description: Type categorises the DomainKey as a Team or a BusinessUnit
-                  key.
+                description: Type categorises the DomainKey scope.
                 enum:
                 - Team
                 - BusinessUnit
