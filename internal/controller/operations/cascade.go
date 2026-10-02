@@ -18,6 +18,7 @@ package operations
 
 import (
 	"context"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -26,14 +27,14 @@ import (
 	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
 )
 
-func ensureParentDomainKey(ctx context.Context, cl client.Client, namespace, fallbackName, accountName string) (string, error) {
+func ensureParentDomainKey(ctx context.Context, cl client.Client, namespace, accountName string) (string, error) {
 	dks := &operationsv1alpha1.DomainKeyList{}
 	if err := cl.List(ctx, dks, client.InNamespace(namespace)); err != nil {
 		return "", err
 	}
 	var winner *operationsv1alpha1.DomainKey
 	for _, dk := range dks.Items {
-		if !dk.DeletionTimestamp.IsZero() {
+		if !dk.DeletionTimestamp.IsZero() || !isNamespaceDomainKey(&dk) {
 			continue
 		}
 		if winner == nil || dk.CreationTimestamp.Before(&winner.CreationTimestamp) ||
@@ -46,17 +47,31 @@ func ensureParentDomainKey(ctx context.Context, cl client.Client, namespace, fal
 	}
 
 	dk := &operationsv1alpha1.DomainKey{}
-	dk.Name = fallbackName
+	dk.Name = accountName
 	dk.Namespace = namespace
 	dk.Annotations = map[string]string{bootstrapAnnotation: bootstrapAnnotationAuto}
 	dk.Spec = operationsv1alpha1.DomainKeySpec{
 		Type:          domainKeyTypeTeam,
 		TenantNameRef: accountName,
 	}
-	if err := cl.Create(ctx, dk); err != nil && !apierrors.IsAlreadyExists(err) {
+	err := cl.Create(ctx, dk)
+	if apierrors.IsAlreadyExists(err) {
+		err = requireNamespaceDomainKey(ctx, cl, dk)
+	}
+	if err != nil {
 		return "", err
 	}
-	return fallbackName, nil
+	return accountName, nil
+}
+
+func requireNamespaceDomainKey(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) error {
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(dk), dk); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if !isNamespaceDomainKey(dk) {
+		return fmt.Errorf("DomainKey %q already exists with scope %s", dk.Name, dk.Spec.Scope)
+	}
+	return nil
 }
 
 func ensureServiceKey(ctx context.Context, cl client.Client, namespace, name, accountName string) error {
