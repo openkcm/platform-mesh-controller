@@ -38,7 +38,7 @@ const (
 // upstream KMS via a polymorphic primaryRootKeyRef pointing at an L1
 // root-key kind (AWS/Azure/OpenBao/GCP/Vault/HSM).
 type DomainKeySpec struct {
-	// Type categorises the DomainKey as a Team or a BusinessUnit key.
+	// Type categorises the DomainKey scope.
 	// +kubebuilder:validation:Enum=Team;BusinessUnit
 	// +required
 	Type string `json:"type"`
