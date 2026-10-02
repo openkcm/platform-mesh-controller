@@ -35,6 +35,7 @@ const (
 	accountFallback             = "account-fallback"
 	teamA                       = "team-a"
 	igorTenant                  = "igor"
+	testInstanceDomainKeyName   = "orders-db"
 )
 
 func TestIsOperationsAPIBinding(t *testing.T) {
@@ -489,6 +490,85 @@ func TestDomainKeySingleton(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, winner)
 	assert.Equal(t, "alpha", winner.Name)
+}
+
+func TestDomainKeySingletonIgnoresInstanceDomainKeys(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	earlierInstance := &operationsv1alpha1.DomainKey{
+		Name:              testInstanceDomainKeyName,
+		Namespace:         testDefaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Spec:              operationsv1alpha1.DomainKeySpec{Scope: operationsv1alpha1.DomainKeyScopeInstance},
+	}
+	namespaced := &operationsv1alpha1.DomainKey{
+		Name:              "team",
+		Namespace:         testDefaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+		Spec:              operationsv1alpha1.DomainKeySpec{Scope: operationsv1alpha1.DomainKeyScopeNamespace},
+	}
+	laterInstance := &operationsv1alpha1.DomainKey{
+		Name:              "billing-db",
+		Namespace:         testDefaultTenantNamespace,
+		CreationTimestamp: metav1.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+		Spec:              operationsv1alpha1.DomainKeySpec{Scope: operationsv1alpha1.DomainKeyScopeInstance},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(earlierInstance.DeepCopy(), namespaced.DeepCopy(), laterInstance.DeepCopy()).
+		Build()
+	reconciler := &operations.DomainKeyReconciler{}
+
+	// when
+	namespacedWinner, namespacedErr := operations.FindEarlierDomainKey(reconciler, ctx, cl, namespaced)
+	instanceWinner, instanceErr := operations.FindEarlierDomainKey(reconciler, ctx, cl, laterInstance)
+
+	// then
+	require.NoError(t, namespacedErr)
+	require.NoError(t, instanceErr)
+	assert.Nil(t, namespacedWinner, "an older Instance DomainKey does not take the Namespace slot")
+	assert.Nil(t, instanceWinner, "Instance DomainKeys are not limited per namespace")
+}
+
+func TestEnsureAutoDomainKeyForNamespaceIgnoresInstanceDomainKeys(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&operationsv1alpha1.OpenBaoRootKey{
+				Name: accountRoot, Namespace: testDefaultTenantNamespace,
+				Status: operationsv1alpha1.OpenBaoRootKeyStatus{
+					CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
+				},
+			},
+			&operationsv1alpha1.DomainKey{
+				Name: testInstanceDomainKeyName, Namespace: teamA,
+				Spec: operationsv1alpha1.DomainKeySpec{
+					Type:          testDomainKeyTypeTeam,
+					Scope:         operationsv1alpha1.DomainKeyScopeInstance,
+					TenantNameRef: igorTenant,
+				},
+			},
+		).
+		Build()
+
+	// when
+	err := operations.EnsureAutoDomainKeyForNamespace(ctx, cl, testDefaultTenantNamespace, teamA, igorTenant)
+
+	// then
+	require.NoError(t, err)
+	domainKeys := &operationsv1alpha1.DomainKeyList{}
+	require.NoError(t, cl.List(ctx, domainKeys, client.InNamespace(teamA)))
+	names := make([]string, 0, len(domainKeys.Items))
+	for _, dk := range domainKeys.Items {
+		names = append(names, dk.Name)
+	}
+	assert.ElementsMatch(t, []string{testInstanceDomainKeyName, teamA}, names)
 }
 
 func TestEnsureTenantOIDCDefaulting(t *testing.T) {
