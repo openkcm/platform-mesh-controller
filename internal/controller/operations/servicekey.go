@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -90,8 +89,8 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{}, nil
 	}
 
-	if handled, res, err := r.ensureParentDomainKeyLink(ctx, cl, sk); handled {
-		return res, err
+	if handled, err := r.ensureParentDomainKeyLink(ctx, cl, sk); handled {
+		return ctrl.Result{}, err
 	}
 
 	// Resolve the parent DomainKey by name (sibling in the same workspace).
@@ -317,39 +316,30 @@ func servesBefore(a, b *operationsv1alpha1.ServiceKey) bool {
 	return a.Name < b.Name
 }
 
-func (r *ServiceKeyReconciler) ensureParentDomainKeyLink(ctx context.Context, cl client.Client, sk *operationsv1alpha1.ServiceKey) (bool, ctrl.Result, error) {
+func (r *ServiceKeyReconciler) ensureParentDomainKeyLink(
+	ctx context.Context,
+	cl client.Client,
+	sk *operationsv1alpha1.ServiceKey,
+) (bool, error) {
+	// A named DomainKey that is missing may still be on its way, so the ref is never rewritten.
 	if sk.Spec.DomainKeyRef != "" {
-		dk := &operationsv1alpha1.DomainKey{}
-		err := cl.Get(ctx, types.NamespacedName{Namespace: sk.Namespace, Name: sk.Spec.DomainKeyRef}, dk)
-		if err == nil {
-			return false, ctrl.Result{}, nil
-		}
-		if !apierrors.IsNotFound(err) {
-			return true, ctrl.Result{}, err
-		}
+		return false, nil
 	}
 	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "TenantResolutionFailed", err.Error())
-		return true, ctrl.Result{}, err
+		return true, err
 	}
-	fallbackName := sk.Spec.DomainKeyRef
-	if fallbackName == "" {
-		fallbackName = account.Name
-	}
-	domainKeyName, err := ensureParentDomainKey(ctx, cl, sk.Namespace, fallbackName, account.Name)
+	domainKeyName, err := ensureParentDomainKey(ctx, cl, sk.Namespace, account.Name)
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "DomainKeyCreateFailed", err.Error())
-		return true, ctrl.Result{}, err
+		return true, err
 	}
-	if sk.Spec.DomainKeyRef != domainKeyName {
-		sk.Spec.DomainKeyRef = domainKeyName
-		if err := cl.Update(ctx, sk); err != nil {
-			return true, ctrl.Result{}, err
-		}
-		return true, ctrl.Result{}, nil
+	sk.Spec.DomainKeyRef = domainKeyName
+	if err := cl.Update(ctx, sk); err != nil {
+		return true, err
 	}
-	return true, ctrl.Result{RequeueAfter: pollInterval}, nil
+	return true, nil
 }
 
 func (r *ServiceKeyReconciler) setReady(sk *operationsv1alpha1.ServiceKey, reason, message string) {

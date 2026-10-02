@@ -22,6 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -30,10 +31,11 @@ import (
 )
 
 const (
-	cascadeNamespace         = "cascade-specs"
-	cascadeDEKName           = "dek-a"
-	cascadeAccountName       = "acme-prod"
-	cascadeDomainKeyTypeTeam = "Team"
+	cascadeNamespaceDomainKeyName = "team-dk"
+	cascadeNamespace              = "cascade-specs"
+	cascadeDEKName                = "dek-a"
+	cascadeAccountName            = "acme-prod"
+	cascadeDomainKeyTypeTeam      = "Team"
 )
 
 func ensureCascadeNamespace() {
@@ -175,6 +177,155 @@ var _ = Describe("key-chain cascade", func() {
 			client.InNamespace(cascadeNamespace),
 		)).To(Succeed())
 		Expect(domainKeys.Items).To(HaveLen(1))
+	})
+
+	It("links a ServiceKey to the Namespace DomainKey, never to an Instance one", func() {
+		// given
+		instance := &operationsv1alpha1.DomainKey{}
+		instance.Name = testInstanceDomainKeyName
+		instance.Namespace = cascadeNamespace
+		instance.Spec = operationsv1alpha1.DomainKeySpec{
+			Type:          cascadeDomainKeyTypeTeam,
+			Scope:         operationsv1alpha1.DomainKeyScopeInstance,
+			TenantNameRef: cascadeAccountName,
+		}
+		Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+		namespaced := &operationsv1alpha1.DomainKey{}
+		namespaced.Name = cascadeNamespaceDomainKeyName
+		namespaced.Namespace = cascadeNamespace
+		namespaced.Spec = operationsv1alpha1.DomainKeySpec{
+			Type:          cascadeDomainKeyTypeTeam,
+			TenantNameRef: cascadeAccountName,
+		}
+		Expect(k8sClient.Create(ctx, namespaced)).To(Succeed())
+		serviceKey := &operationsv1alpha1.ServiceKey{}
+		serviceKey.Name = "svc-c"
+		serviceKey.Namespace = cascadeNamespace
+		serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{TenantNameRef: cascadeAccountName}
+		Expect(k8sClient.Create(ctx, serviceKey)).To(Succeed())
+		reconciler := &operations.ServiceKeyReconciler{
+			APIClient: backend,
+			Manager:   newTestManager(),
+		}
+
+		// when
+		for range 2 {
+			_, err := reconciler.Reconcile(ctx, requestFor(serviceKey))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// then
+		reloaded := &operationsv1alpha1.ServiceKey{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(serviceKey), reloaded)).To(Succeed())
+		Expect(reloaded.Spec.DomainKeyRef).To(Equal(cascadeNamespaceDomainKeyName))
+	})
+
+	It("creates a Namespace DomainKey when the namespace only holds Instance ones", func() {
+		// given
+		instance := &operationsv1alpha1.DomainKey{}
+		instance.Name = testInstanceDomainKeyName
+		instance.Namespace = cascadeNamespace
+		instance.Spec = operationsv1alpha1.DomainKeySpec{
+			Type:          cascadeDomainKeyTypeTeam,
+			Scope:         operationsv1alpha1.DomainKeyScopeInstance,
+			TenantNameRef: cascadeAccountName,
+		}
+		Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+		serviceKey := &operationsv1alpha1.ServiceKey{}
+		serviceKey.Name = "svc-d"
+		serviceKey.Namespace = cascadeNamespace
+		serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{TenantNameRef: cascadeAccountName}
+		Expect(k8sClient.Create(ctx, serviceKey)).To(Succeed())
+		reconciler := &operations.ServiceKeyReconciler{
+			APIClient: backend,
+			Manager:   newTestManager(),
+		}
+
+		// when
+		for range 2 {
+			_, err := reconciler.Reconcile(ctx, requestFor(serviceKey))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// then
+		reloaded := &operationsv1alpha1.ServiceKey{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(serviceKey), reloaded)).To(Succeed())
+		Expect(reloaded.Spec.DomainKeyRef).To(Equal(cascadeAccountName))
+		created := &operationsv1alpha1.DomainKey{}
+		key := types.NamespacedName{Name: cascadeAccountName, Namespace: cascadeNamespace}
+		Expect(k8sClient.Get(ctx, key, created)).To(Succeed())
+		Expect(created.Spec.Scope).To(Equal(operationsv1alpha1.DomainKeyScopeNamespace))
+	})
+
+	It("keeps a ServiceKey on the DomainKey it names while that DomainKey is missing", func() {
+		// given
+		namespaced := &operationsv1alpha1.DomainKey{}
+		namespaced.Name = cascadeNamespaceDomainKeyName
+		namespaced.Namespace = cascadeNamespace
+		namespaced.Spec = operationsv1alpha1.DomainKeySpec{
+			Type:          cascadeDomainKeyTypeTeam,
+			TenantNameRef: cascadeAccountName,
+		}
+		Expect(k8sClient.Create(ctx, namespaced)).To(Succeed())
+		serviceKey := &operationsv1alpha1.ServiceKey{}
+		serviceKey.Name = "svc-f"
+		serviceKey.Namespace = cascadeNamespace
+		serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{
+			TenantNameRef: cascadeAccountName,
+			DomainKeyRef:  testInstanceDomainKeyName,
+		}
+		Expect(k8sClient.Create(ctx, serviceKey)).To(Succeed())
+		reconciler := &operations.ServiceKeyReconciler{
+			APIClient: backend,
+			Manager:   newTestManager(),
+		}
+
+		// when
+		for range 2 {
+			_, err := reconciler.Reconcile(ctx, requestFor(serviceKey))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		// then
+		reloaded := &operationsv1alpha1.ServiceKey{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(serviceKey), reloaded)).To(Succeed())
+		Expect(reloaded.Spec.DomainKeyRef).To(Equal(testInstanceDomainKeyName))
+		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Reason).To(Equal("DomainKeyNotFound"))
+	})
+
+	It("does not link a ServiceKey to an Instance DomainKey that took the default name", func() {
+		// given
+		instance := &operationsv1alpha1.DomainKey{}
+		instance.Name = cascadeAccountName
+		instance.Namespace = cascadeNamespace
+		instance.Spec = operationsv1alpha1.DomainKeySpec{
+			Type:          cascadeDomainKeyTypeTeam,
+			Scope:         operationsv1alpha1.DomainKeyScopeInstance,
+			TenantNameRef: cascadeAccountName,
+		}
+		Expect(k8sClient.Create(ctx, instance)).To(Succeed())
+		serviceKey := &operationsv1alpha1.ServiceKey{}
+		serviceKey.Name = "svc-e"
+		serviceKey.Namespace = cascadeNamespace
+		serviceKey.Spec = operationsv1alpha1.ServiceKeySpec{TenantNameRef: cascadeAccountName}
+		Expect(k8sClient.Create(ctx, serviceKey)).To(Succeed())
+		reconciler := &operations.ServiceKeyReconciler{
+			APIClient: backend,
+			Manager:   newTestManager(),
+		}
+		_, err := reconciler.Reconcile(ctx, requestFor(serviceKey))
+		Expect(err).NotTo(HaveOccurred())
+
+		// when
+		_, err = reconciler.Reconcile(ctx, requestFor(serviceKey))
+
+		// then
+		Expect(err).To(MatchError(ContainSubstring("already exists with scope Instance")))
+		reloaded := &operationsv1alpha1.ServiceKey{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(serviceKey), reloaded)).To(Succeed())
+		Expect(reloaded.Spec.DomainKeyRef).To(BeEmpty())
 	})
 
 	It("creates and links a ServiceKey when a data key references none", func() {
