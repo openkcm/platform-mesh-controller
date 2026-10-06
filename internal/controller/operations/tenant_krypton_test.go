@@ -28,8 +28,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
-	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
+	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
+	"github.com/openkcm/platform-mesh-controller/internal/kryptongrpc"
 )
 
 // The testBackend specs cover the reconcile logic, and the kryptongrpc specs

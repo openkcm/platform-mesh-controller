@@ -30,10 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
-	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
-	"github.com/openkcm/openkcm-controller/internal/mockapi"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
+	"github.com/openkcm/platform-mesh-controller/internal/mockapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const testTenantID = "tenant-uuid"

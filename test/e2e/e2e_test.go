@@ -30,20 +30,20 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/openkcm/openkcm-controller/test/utils"
+	"github.com/openkcm/platform-mesh-controller/test/utils"
 )
 
 // namespace where the project is deployed in
-const namespace = "openkcm-controller-system"
+const namespace = "platform-mesh-controller-system"
 
 // serviceAccountName created for the project
-const serviceAccountName = "openkcm-controller-manager"
+const serviceAccountName = "platform-mesh-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "openkcm-controller-manager-metrics-service"
+const metricsServiceName = "platform-mesh-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "openkcm-controller-metrics-binding"
+const metricsRoleBindingName = "platform-mesh-controller-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -74,7 +74,7 @@ var _ = Describe("Manager", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
 		By("enabling local health-only mode for the Kind smoke deployment")
-		cmd = exec.Command("kubectl", "patch", "deployment", "openkcm-controller-manager",
+		cmd = exec.Command("kubectl", "patch", "deployment", "platform-mesh-controller-manager",
 			"-n", namespace,
 			"--type=json",
 			"-p", `[
@@ -187,7 +187,7 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=openkcm-controller-metrics-reader",
+				"--clusterrole=platform-mesh-controller-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
 			_, err := utils.Run(cmd)

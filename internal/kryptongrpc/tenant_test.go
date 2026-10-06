@@ -29,8 +29,8 @@ import (
 
 	kryptonadmin "github.com/openkcm/krypton/pkg/api/v1/proto/admin"
 
-	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/internal/kryptongrpc"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const (

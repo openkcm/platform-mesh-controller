@@ -19,7 +19,7 @@ package operations
 import (
 	"context"
 
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 // Backend is the key management service the reconcilers drive. It is declared

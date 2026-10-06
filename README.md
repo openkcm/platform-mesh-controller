@@ -1,6 +1,6 @@
-# openkcm-controller
+# platform-mesh-controller
 
-[![REUSE status](https://api.reuse.software/badge/github.com/openkcm/openkcm-controller)](https://api.reuse.software/info/github.com/openkcm/openkcm-controller)
+[![REUSE status](https://api.reuse.software/badge/github.com/openkcm/platform-mesh-controller)](https://api.reuse.software/info/github.com/openkcm/platform-mesh-controller)
 
 Kubernetes controller that connects Platform Mesh to OpenKCM Krypton.
 
@@ -32,7 +32,7 @@ single deployment serves every account workspace.
 
 | Chart | What it installs |
 |---|---|
-| `charts/operator` | the controller deployment, RBAC and CRDs |
+| `charts/platform-mesh-controller` | the controller deployment, RBAC and CRDs |
 | `charts/pm-integration` | kcp metadata: `APIExport`, `APIResourceSchema`, `ProviderMetadata`, `ContentConfiguration`. No workloads |
 
 The microfrontend served to the Platform Mesh portal stays in the Showroom
@@ -66,7 +66,7 @@ make envtest
 
 ```sh
 helm install pm-integration charts/pm-integration --kubeconfig <kcp-kubeconfig>
-helm install operator charts/operator -n openkcm-controller-system --create-namespace
+helm install operator charts/platform-mesh-controller -n platform-mesh-controller-system --create-namespace
 ```
 
 The controller reads its kcp credentials from the secret named in
@@ -79,13 +79,13 @@ make manifests
 ```
 
 This regenerates CRDs into `config/crd/bases` and copies them into
-`charts/operator/crds`. Keep both in sync; the chart CRDs are what actually gets
+`charts/platform-mesh-controller/crds`. Keep both in sync; the chart CRDs are what actually gets
 installed.
 
 ## Support, Feedback, Contributing
 
 This project is open to feature requests, suggestions and bug reports via
-[GitHub issues](https://github.com/openkcm/openkcm-controller/issues).
+[GitHub issues](https://github.com/openkcm/platform-mesh-controller/issues).
 Contribution and feedback are encouraged and always welcome. For more
 information about how to contribute, see our
 [Contribution Guidelines](CONTRIBUTING.md).
@@ -93,7 +93,7 @@ information about how to contribute, see our
 ## Security / Disclosure
 
 If you find any bug that may be a security problem, please follow our
-instructions [in our security policy](https://github.com/openkcm/openkcm-controller/security/policy)
+instructions [in our security policy](https://github.com/openkcm/platform-mesh-controller/security/policy)
 on how to report it. Please do not create GitHub issues for security-related
 doubts or problems.
 
@@ -110,7 +110,7 @@ Copyright 2026 SAP SE or an SAP affiliate company and OpenKCM contributors.
 Please see our [LICENSE](LICENSE) for copyright and license information.
 Detailed information including third-party components and their
 licensing/copyright information is available
-[via the REUSE tool](https://api.reuse.software/info/github.com/openkcm/openkcm-controller).
+[via the REUSE tool](https://api.reuse.software/info/github.com/openkcm/platform-mesh-controller).
 
 ---
 

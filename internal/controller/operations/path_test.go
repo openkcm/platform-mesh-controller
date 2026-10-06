@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
+	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
 )
 
 // accountNameFromPath is the security boundary for tenant identity: the

@@ -9,11 +9,11 @@ includes:
     flatten: true
     vars:
       API_DIRS: '{{.ROOT_DIR}}/api/operations/v1alpha1/... {{.ROOT_DIR}}/api/shared/...'
-      MANIFEST_OUT: '{{.ROOT_DIR}}/charts/operator/crds'
+      MANIFEST_OUT: '{{.ROOT_DIR}}/charts/platform-mesh-controller/crds'
       CODE_DIRS: '{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/operations/v1alpha1/... {{.ROOT_DIR}}/api/shared/...'
       COMPONENTS: 'platform-mesh-controller '
       REPO_URL: 'https://github.com/opekcm/platform-mesh-controller'
-      CHART_COMPONENTS: "operator"
+      CHART_COMPONENTS: "platform-mesh-controller"
       CRDS_COMPONENTS: 'platform-mesh-controller '
-      CRDS_PATH: '{{.ROOT_DIR}}/charts/operator/crds'
+      CRDS_PATH: '{{.ROOT_DIR}}/charts/platform-mesh-controller/crds'
       SKIP_VALIDATION_TESTS: 'true'

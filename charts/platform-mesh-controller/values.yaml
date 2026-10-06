@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/openkcm/openkcm-controller
+  repository: ghcr.io/openkcm/platform-mesh-controller
   tag: 0.10.9 # x-release-please-version
   pullPolicy: IfNotPresent
 imagePullSecrets: []

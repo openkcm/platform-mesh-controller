@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/openkcm/openkcm-controller/internal/mockapi"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/internal/mockapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 func startTestServer(t *testing.T) *openkcmapi.Client {

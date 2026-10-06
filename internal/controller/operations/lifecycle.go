@@ -15,9 +15,9 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
-	"github.com/openkcm/openkcm-controller/api/shared"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 // desiredLifecycleState converts the user-facing spec.lifecycle field to the

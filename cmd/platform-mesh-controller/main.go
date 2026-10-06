@@ -44,11 +44,11 @@ import (
 	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 	kcptenancyv1alpha1 "github.com/kcp-dev/sdk/apis/tenancy/v1alpha1"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
-	operationscontroller "github.com/openkcm/openkcm-controller/internal/controller/operations"
-	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
-	"github.com/openkcm/openkcm-controller/internal/mockapi"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	operationscontroller "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
+	"github.com/openkcm/platform-mesh-controller/internal/kryptongrpc"
+	"github.com/openkcm/platform-mesh-controller/internal/mockapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 var (

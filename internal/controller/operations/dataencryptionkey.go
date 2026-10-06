@@ -33,9 +33,9 @@ import (
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
-	"github.com/openkcm/openkcm-controller/api/shared"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const (

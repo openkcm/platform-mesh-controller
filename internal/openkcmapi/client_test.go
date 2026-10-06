@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 func TestErrorsAreClassifiedByStatus(t *testing.T) {

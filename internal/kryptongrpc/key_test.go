@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
-	"github.com/openkcm/openkcm-controller/api/shared"
-	"github.com/openkcm/openkcm-controller/internal/kryptongrpc"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/internal/kryptongrpc"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const (

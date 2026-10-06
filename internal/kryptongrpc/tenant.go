@@ -32,7 +32,7 @@ import (
 
 	kryptonadmin "github.com/openkcm/krypton/pkg/api/v1/proto/admin"
 
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 // TenantClient implements the tenant operations against Krypton's

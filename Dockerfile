@@ -24,8 +24,8 @@ RUN CGO_ENABLED=0 GOEXPERIMENT=runtimesecret GOOS=${TARGETOS:-linux} GOARCH=${TA
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
-LABEL org.opencontainers.image.source=https://github.com/openkcm/openkcm-controller
-LABEL org.opencontainers.image.title=openkcm-controller
+LABEL org.opencontainers.image.source=https://github.com/openkcm/platform-mesh-controller
+LABEL org.opencontainers.image.title=platform-mesh-controller
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532
