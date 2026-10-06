@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 )
 
 func ensureParentDomainKey(ctx context.Context, cl client.Client, namespace, accountName string) (string, error) {

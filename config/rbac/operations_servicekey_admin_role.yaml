@@ -1,4 +1,4 @@
-# This rule is not used by the project openkcm-controller itself.
+# This rule is not used by the project platform-mesh-controller itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
 # Grants full permissions ('*') over operations.openkcm.io.
@@ -9,7 +9,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
-    app.kubernetes.io/name: openkcm-controller
+    app.kubernetes.io/name: platform-mesh-controller
     app.kubernetes.io/managed-by: kustomize
   name: operations-servicekey-admin-role
 rules:

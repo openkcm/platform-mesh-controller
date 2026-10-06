@@ -32,7 +32,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 	"sigs.k8s.io/multicluster-runtime/providers/single"
 
-	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
+	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
 )
 
 const (

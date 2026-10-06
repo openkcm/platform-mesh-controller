@@ -1,4 +1,4 @@
-# openkcm-controller
+# platform-mesh-controller
 
 OpenKCM provider integration for Platform Mesh Showroom.
 

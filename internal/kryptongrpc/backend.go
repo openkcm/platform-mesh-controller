@@ -24,8 +24,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/openkcm/openkcm-controller/api/shared"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 // keyIDSeparator joins the tenant and key id; both are UUIDs, so it never collides.

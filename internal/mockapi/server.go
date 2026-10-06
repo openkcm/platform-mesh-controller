@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package mockapi implements an in-process mock of the OpenKCM / Krypton
-// REST API used by the openkcm-controller during development and in the
+// REST API used by the platform-mesh-controller during development and in the
 // automated demo. It intentionally mimics the behaviour of a real KMS
 // closely enough to exercise the reconciler's happy path, idempotency
 // guarantees and failure handling:

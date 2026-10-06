@@ -26,7 +26,7 @@ import (
 
 	kcpcorev1alpha1 "github.com/kcp-dev/sdk/apis/core/v1alpha1"
 
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const (

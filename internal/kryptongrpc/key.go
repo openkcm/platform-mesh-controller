@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	kryptonkeys "github.com/openkcm/krypton/pkg/api/v1/proto/admin/keys"
-	"github.com/openkcm/openkcm-controller/api/shared"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 	"google.golang.org/grpc"
 )
 

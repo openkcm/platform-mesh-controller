@@ -33,8 +33,8 @@ import (
 
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
-	"github.com/openkcm/openkcm-controller/api/shared"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
 )
 
 // AccountBootstrapReconciler watches APIBinding events through the

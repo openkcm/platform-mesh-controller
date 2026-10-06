@@ -1,4 +1,4 @@
-module github.com/openkcm/openkcm-controller
+module github.com/openkcm/platform-mesh-controller
 
 go 1.27.1
 

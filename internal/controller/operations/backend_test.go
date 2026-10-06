@@ -21,9 +21,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/openkcm/openkcm-controller/api/shared"
-	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
-	"github.com/openkcm/openkcm-controller/internal/openkcmapi"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 // testBackend is a hand-written Backend used by the reconciler tests. It

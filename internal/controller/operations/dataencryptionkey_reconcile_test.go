@@ -28,9 +28,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operationsv1alpha1 "github.com/openkcm/openkcm-controller/api/operations/v1alpha1"
-	"github.com/openkcm/openkcm-controller/api/shared"
-	operations "github.com/openkcm/openkcm-controller/internal/controller/operations"
+	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
+	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
 )
 
 const (

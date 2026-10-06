@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/openkcm/openkcm-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
 )
 
 // GCPRootKeySpec is a stub schema sufficient to satisfy
