@@ -32,7 +32,7 @@ single deployment serves every account workspace.
 
 | Chart | What it installs |
 |---|---|
-| `charts/operator` | the controller deployment, RBAC and CRDs |
+| `charts/platform-mesh-controller` | the controller deployment, RBAC and CRDs |
 | `charts/pm-integration` | kcp metadata: `APIExport`, `APIResourceSchema`, `ProviderMetadata`, `ContentConfiguration`. No workloads |
 
 The microfrontend served to the Platform Mesh portal stays in the Showroom
@@ -66,7 +66,7 @@ make envtest
 
 ```sh
 helm install pm-integration charts/pm-integration --kubeconfig <kcp-kubeconfig>
-helm install operator charts/operator -n platform-mesh-controller-system --create-namespace
+helm install operator charts/platform-mesh-controller -n platform-mesh-controller-system --create-namespace
 ```
 
 The controller reads its kcp credentials from the secret named in
@@ -79,7 +79,7 @@ make manifests
 ```
 
 This regenerates CRDs into `config/crd/bases` and copies them into
-`charts/operator/crds`. Keep both in sync; the chart CRDs are what actually gets
+`charts/platform-mesh-controller/crds`. Keep both in sync; the chart CRDs are what actually gets
 installed.
 
 ## Support, Feedback, Contributing
