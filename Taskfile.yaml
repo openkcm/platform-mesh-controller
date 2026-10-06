@@ -13,7 +13,6 @@ includes:
       CODE_DIRS: '{{.ROOT_DIR}}/cmd/... {{.ROOT_DIR}}/internal/... {{.ROOT_DIR}}/api/operations/v1alpha1/... {{.ROOT_DIR}}/api/shared/...'
       COMPONENTS: 'platform-mesh-controller '
       REPO_URL: 'https://github.com/opekcm/platform-mesh-controller'
-      GENERATE_DOCS_INDEX: "true"
       CHART_COMPONENTS: "operator"
       CRDS_COMPONENTS: 'platform-mesh-controller '
       CRDS_PATH: '{{.ROOT_DIR}}/charts/operator/crds'
