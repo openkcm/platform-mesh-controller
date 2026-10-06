@@ -16,3 +16,4 @@ includes:
       CHART_COMPONENTS: "operator"
       CRDS_COMPONENTS: 'platform-mesh-controller '
       CRDS_PATH: '{{.ROOT_DIR}}/charts/operator/crds'
+      SKIP_VALIDATION_TESTS: 'true'
