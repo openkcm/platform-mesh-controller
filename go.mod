@@ -11,9 +11,9 @@ require (
 	github.com/openkcm/krypton v0.1.0
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/grpc v1.84.0
-	k8s.io/api v0.36.0
-	k8s.io/apimachinery v0.37.1
-	k8s.io/client-go v0.36.0
+	k8s.io/api v0.36.1
+	k8s.io/apimachinery v0.36.1
+	k8s.io/client-go v0.36.1
 	sigs.k8s.io/controller-runtime v0.24.1
 	sigs.k8s.io/multicluster-runtime v0.24.1
 )

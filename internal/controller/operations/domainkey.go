@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
@@ -445,7 +446,7 @@ func (r *DomainKeyReconciler) SetupWithManager(mgr mcmanager.Manager) error {
 		Complete(r)
 }
 
-func (r *DomainKeyReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
+func (r *DomainKeyReconciler) clusterClient(ctx context.Context, clusterName multicluster.ClusterName) (client.Client, error) {
 	cluster, err := r.Manager.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, err
