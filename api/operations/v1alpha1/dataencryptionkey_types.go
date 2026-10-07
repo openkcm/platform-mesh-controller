@@ -107,7 +107,3 @@ type DataEncryptionKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []DataEncryptionKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&DataEncryptionKey{}, &DataEncryptionKeyList{})
-}

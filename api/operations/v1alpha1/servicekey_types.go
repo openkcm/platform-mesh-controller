@@ -97,7 +97,3 @@ type ServiceKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []ServiceKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ServiceKey{}, &ServiceKeyList{})
-}

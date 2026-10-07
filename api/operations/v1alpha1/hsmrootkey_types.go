@@ -91,7 +91,3 @@ type HSMRootKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []HSMRootKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&HSMRootKey{}, &HSMRootKeyList{})
-}

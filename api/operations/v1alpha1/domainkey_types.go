@@ -135,7 +135,3 @@ type DomainKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []DomainKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&DomainKey{}, &DomainKeyList{})
-}

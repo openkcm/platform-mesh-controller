@@ -94,7 +94,3 @@ type GCPRootKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []GCPRootKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&GCPRootKey{}, &GCPRootKeyList{})
-}

@@ -114,7 +114,3 @@ type OpenBaoRootKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []OpenBaoRootKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&OpenBaoRootKey{}, &OpenBaoRootKeyList{})
-}
