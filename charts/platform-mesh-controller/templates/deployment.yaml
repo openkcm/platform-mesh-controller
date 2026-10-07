@@ -1,37 +1,54 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: platform-mesh-controller-manager
-  namespace: {{ .Release.Namespace }}
+  name: {{ include "platform-mesh-controller.fullname" . }}
+  namespace: {{ include "platform-mesh-controller.namespace" . }}
   labels:
-    {{- include "operator.labels" . | nindent 4 }}
-    control-plane: controller-manager
+    {{- include "platform-mesh-controller.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicas }}
+  replicas: {{ .Values.replicaCount }}
+  {{- with .Values.revisionHistoryLimit }}
+  revisionHistoryLimit: {{ . }}
+  {{- end }}
   selector:
     matchLabels:
-      control-plane: controller-manager
-  strategy: {}
+      {{- include "platform-mesh-controller.selectorLabels" . | nindent 6 }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
-        {{- include "operator.labels" . | nindent 8 }}
-        control-plane: controller-manager
+        {{- include "platform-mesh-controller.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      {{- if .Values.imagePullSecrets }}
+      {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
-      {{- range .Values.imagePullSecrets }}
-        - name: {{ .name }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "platform-mesh-controller.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      enableServiceLinks: {{ .Values.enableServiceLinks }}
+      {{- with .Values.global.priorityClassName }}
+      priorityClassName: {{ . | quote }}
       {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10
       containers:
         - name: manager
-          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          image: {{ include "platform-mesh-controller.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /manager
           args:
             - --kcp-kubeconfig=/etc/kcp/kubeconfig
             - --tenant-namespace={{ .Values.tenantNamespace }}
@@ -43,14 +60,17 @@ spec:
             {{- end }}
             - --health-probe-bind-address=:8081
             - --metrics-bind-address=:8080
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
-            # POD_NAMESPACE is used by the mock OpenKCM API server to
-            # persist its state in a ConfigMap in the pod's own
-            # namespace, so state survives pod restarts.
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - containerPort: 8081
               name: health
@@ -58,34 +78,66 @@ spec:
             - containerPort: 8080
               name: metrics
               protocol: TCP
+          {{- if .Values.livenessProbe.enabled }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8081
-            initialDelaySeconds: 15
-            periodSeconds: 20
+              port: health
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+            successThreshold: {{ .Values.livenessProbe.successThreshold }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8081
-            initialDelaySeconds: 5
-            periodSeconds: 10
+              port: health
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}
+            successThreshold: {{ .Values.readinessProbe.successThreshold }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+          {{- end }}
+          {{- with .Values.resources }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.containerSecurityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: kcp-kubeconfig
               mountPath: /etc/kcp
               readOnly: true
-      securityContext:
-        runAsNonRoot: true
-      serviceAccountName: platform-mesh-controller-manager
-      terminationGracePeriodSeconds: 10
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with merge (.Values.nodeSelector | default dict) (.Values.global.nodeSelector | default dict) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: kcp-kubeconfig
           secret:
             secretName: {{ .Values.kcpKubeconfig.secretName }}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

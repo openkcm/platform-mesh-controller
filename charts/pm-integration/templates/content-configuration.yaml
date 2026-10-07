@@ -1,12 +1,12 @@
-{{- $baseUrl := printf "%s://%s" (.Values.PUBLIC_SCHEME | default "https") (.Values.PUBLIC_HOST | default "localhost") }}
-{{- $metadata := .Values.metadata | default dict }}
-{{- $accountPath := get $metadata "accountContentPath" | default (get $metadata "contentPath" | default "/pm-content.json") }}
-{{- $namespacePath := get $metadata "namespaceContentPath" | default "/pm-content-namespace.json" }}
+{{- $baseUrl := printf "%s://%s" (.Values.publicScheme | default "https") (.Values.publicHost | default "localhost") -}}
+{{- $accountPath := .Values.metadata.contentPath | default "/pm-content.json" -}}
+{{- $namespacePath := .Values.metadata.namespaceContentPath | default "/pm-content-namespace.json" -}}
 apiVersion: ui.platform-mesh.io/v1alpha1
 kind: ContentConfiguration
 metadata:
   name: openkcm
   labels:
+    {{- include "pm-integration.labels" . | nindent 4 }}
     ui.platform-mesh.io/entity: core_platform-mesh_io_account
     ui.platform-mesh.io/content-for: operations.openkcm.io
 spec:
@@ -19,6 +19,7 @@ kind: ContentConfiguration
 metadata:
   name: openkcm-namespace
   labels:
+    {{- include "pm-integration.labels" . | nindent 4 }}
     # Platform Mesh contentconfigurations virtual-workspace selects provider
     # content by the KCP workspace level, not by the Luigi node entity. Keep the
     # metadata label account-scoped so the namespace Luigi node is returned for

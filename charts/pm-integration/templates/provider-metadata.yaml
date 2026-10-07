@@ -8,6 +8,8 @@ metadata:
   # The account-scoped OpenKCM export publishes content-for=operations.openkcm.io,
   # so this identity must match that exact value.
   name: operations.openkcm.io
+  labels:
+    {{- include "pm-integration.labels" . | nindent 4 }}
 spec:
   displayName: {{ $marketplaceTitle | quote }}
   description: |

@@ -1,0 +1,8 @@
+pm-integration {{ .Chart.AppVersion }} deployed successfully!
+
+APIExport     : operations.openkcm.io
+Content URL   : {{ .Values.publicScheme }}://{{ .Values.publicHost }}{{ .Values.metadata.contentPath }}
+Namespace URL : {{ .Values.publicScheme }}://{{ .Values.publicHost }}{{ .Values.metadata.namespaceContentPath }}
+
+Platform Mesh marketplace discovers this provider via:
+  ProviderMetadata.name = operations.openkcm.io

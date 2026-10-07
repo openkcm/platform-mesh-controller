@@ -1,0 +1,19 @@
+platform-mesh-controller {{ .Chart.AppVersion }} deployed successfully!
+
+  Namespace : {{ include "platform-mesh-controller.namespace" . }}
+  Workload  : {{ include "platform-mesh-controller.fullname" . }}
+
+Check pod status:
+  kubectl get pods -n {{ include "platform-mesh-controller.namespace" . }} \
+    -l "app.kubernetes.io/name={{ include "platform-mesh-controller.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+KCP APIExport endpoint : {{ .Values.operations.apiExportEndpointSliceName }}
+{{- if .Values.krypton.grpcAddr }}
+Krypton gRPC           : {{ .Values.krypton.grpcAddr }}
+{{- else }}
+Mock API               : {{ .Values.mockAPI.addr }} (in-pod, no external network exposure)
+{{- end }}
+{{- if and .Values.prometheus.enabled .Values.prometheus.servicemonitor.enabled }}
+
+A ServiceMonitor has been created in namespace "{{ .Values.prometheus.servicemonitor.namespace | default (include "platform-mesh-controller.namespace" .) }}".
+{{- end }}

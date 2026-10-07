@@ -1,10 +1,58 @@
+global:
+  imagePullSecrets: []
+  nodeSelector: {}
+  priorityClassName: ""
+  commonLabels: {}
+  rbac:
+    create: true
+  leaderElection:
+    # Namespace for leader-election leases and mock-API ConfigMaps.
+    # Defaults to the release namespace when empty.
+    namespace: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
 image:
   repository: ghcr.io/openkcm/platform-mesh-controller
   tag: 0.10.9 # x-release-please-version
+  digest: ""
   pullPolicy: IfNotPresent
-imagePullSecrets: []
 
-replicas: 1
+replicaCount: 1
+revisionHistoryLimit: 1
+strategy: {}
+enableServiceLinks: false
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  labels: {}
+  automountServiceAccountToken: true
+
+podDisruptionBudget:
+  enabled: false
+  # minAvailable: 1
+  # maxUnavailable: 1
+  # unhealthyPodEvictionPolicy: AlwaysAllow
+
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context
+securityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
 
 resources:
   limits:
@@ -13,6 +61,28 @@ resources:
   requests:
     cpu: 10m
     memory: 64Mi
+
+nodeSelector:
+  kubernetes.io/os: linux
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+livenessProbe:
+  enabled: false
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
 
 kcpKubeconfig:
   secretName: pm-kubeconfig
@@ -27,17 +97,48 @@ mockAPI:
   addr: "127.0.0.1:9443"
 
 openkcmAPI:
-  # Default: in-pod mock API server (same process as the controller).
-  # Override with a real OpenKCM/Krypton endpoint when available.
+  # Default: in-pod mock API server. Override with a real OpenKCM/Krypton endpoint.
   url: "http://127.0.0.1:9443"
 
 krypton:
-  # host:port of Krypton's admin gRPC API. When empty, Tenant, DomainKey,
-  # ServiceKey and DataEncryptionKey reconciliation keep using the mock above;
-  # when set, they talk to Krypton instead.
-  #
-  # Leave empty until the transport is settled: the client currently dials in
-  # plaintext, while the showroom gateway expects a bearer token and has no
-  # mTLS configured. Pointing this at the gateway today will fail to
-  # authenticate.
+  # host:port of Krypton's admin gRPC API. When empty, reconcilers use the mock
+  # above. The client dials in plaintext; leave empty until mTLS/bearer auth is
+  # settled against the showroom gateway.
   grpcAddr: ""
+
+extraArgs: []
+extraEnv: []
+volumes: []
+volumeMounts: []
+extraContainers: []
+
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: false
+    prometheusInstance: default
+    targetPort: metrics
+    path: /metrics
+    interval: 60s
+    scrapeTimeout: 30s
+    labels: {}
+    annotations: {}
+    honorLabels: false
+    endpointAdditionalProperties: {}
+    namespace: ""
+
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress:
+    - ports:
+        - port: 80
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+        - port: 53
+          protocol: TCP
+        - port: 53
+          protocol: UDP
+        - port: 6443
+          protocol: TCP
