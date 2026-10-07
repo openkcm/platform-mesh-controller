@@ -123,7 +123,3 @@ type AWSRootKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []AWSRootKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&AWSRootKey{}, &AWSRootKeyList{})
-}

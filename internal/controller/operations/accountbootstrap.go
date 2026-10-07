@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	mcbuilder "sigs.k8s.io/multicluster-runtime/pkg/builder"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
+	"sigs.k8s.io/multicluster-runtime/pkg/multicluster"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
@@ -287,7 +288,7 @@ func (r *NamespaceBootstrapReconciler) SetupWithManager(mgr mcmanager.Manager) e
 		Complete(r)
 }
 
-func (r *NamespaceBootstrapReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
+func (r *NamespaceBootstrapReconciler) clusterClient(ctx context.Context, clusterName multicluster.ClusterName) (client.Client, error) {
 	cluster, err := r.Manager.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, err
@@ -495,7 +496,7 @@ func (r *AccountBootstrapReconciler) SetupWithManager(mgr mcmanager.Manager) err
 		Complete(r)
 }
 
-func (r *AccountBootstrapReconciler) clusterClient(ctx context.Context, clusterName string) (client.Client, error) {
+func (r *AccountBootstrapReconciler) clusterClient(ctx context.Context, clusterName multicluster.ClusterName) (client.Client, error) {
 	cluster, err := r.Manager.GetCluster(ctx, clusterName)
 	if err != nil {
 		return nil, err

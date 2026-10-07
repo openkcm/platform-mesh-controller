@@ -114,7 +114,3 @@ type AzureRootKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []AzureRootKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&AzureRootKey{}, &AzureRootKeyList{})
-}

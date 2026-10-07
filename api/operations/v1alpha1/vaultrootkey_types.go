@@ -95,7 +95,3 @@ type VaultRootKeyList struct {
 	metav1.ListMeta `json:"metadata,omitzero"`
 	Items           []VaultRootKey `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&VaultRootKey{}, &VaultRootKeyList{})
-}
