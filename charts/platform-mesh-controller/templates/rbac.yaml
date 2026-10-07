@@ -1,12 +1,13 @@
+{{- if .Values.global.rbac.create }}
+{{- $leNamespace := .Values.global.leaderElection.namespace | default .Release.Namespace }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: platform-mesh-controller-manager
+  name: {{ include "platform-mesh-controller.fullname" . }}
   labels:
-    {{- include "operator.labels" . | nindent 4 }}
+    {{- include "platform-mesh-controller.labels" . | nindent 4 }}
 rules:
-  - apiGroups:
-      - operations.openkcm.io
+  - apiGroups: [operations.openkcm.io]
     resources:
       - tenants
       - domainkeys
@@ -15,16 +16,8 @@ rules:
       - azurerootkeys
       - openbaorootkeys
       - dataencryptionkeys
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - operations.openkcm.io
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [operations.openkcm.io]
     resources:
       - tenants/status
       - domainkeys/status
@@ -33,12 +26,8 @@ rules:
       - azurerootkeys/status
       - openbaorootkeys/status
       - dataencryptionkeys/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - operations.openkcm.io
+    verbs: [get, patch, update]
+  - apiGroups: [operations.openkcm.io]
     resources:
       - tenants/finalizers
       - domainkeys/finalizers
@@ -47,91 +36,71 @@ rules:
       - azurerootkeys/finalizers
       - openbaorootkeys/finalizers
       - dataencryptionkeys/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - apis.kcp.io
-    resources:
-      - apibindings
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - core.kcp.io
-    resources:
-      - logicalclusters
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - namespaces
-    verbs:
-      - get
-      - list
-      - watch
-      - create
-  - apiGroups:
-      - ""
-    resources:
-      - events
-    verbs:
-      - create
-      - patch
-  # Mock API persistence stores state in an in-cluster ConfigMap.
-  - apiGroups:
-      - ""
-    resources:
-      - configmaps
-    verbs:
-      - get
-      - list
-      - watch
-      - create
-      - update
-      - patch
-      - delete
-  # Leader election
-  - apiGroups:
-      - coordination.k8s.io
-    resources:
-      - leases
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  # Metrics auth
-  - apiGroups:
-      - authentication.k8s.io
-    resources:
-      - tokenreviews
-    verbs:
-      - create
-  - apiGroups:
-      - authorization.k8s.io
-    resources:
-      - subjectaccessreviews
-    verbs:
-      - create
+    verbs: [update]
+  - apiGroups: [apis.kcp.io]
+    resources: [apibindings]
+    verbs: [get, list, watch]
+  - apiGroups: [core.kcp.io]
+    resources: [logicalclusters]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch, create]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  # Metrics authentication
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: platform-mesh-controller-manager
+  name: {{ include "platform-mesh-controller.fullname" . }}
   labels:
-    {{- include "operator.labels" . | nindent 4 }}
+    {{- include "platform-mesh-controller.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: platform-mesh-controller-manager
+  name: {{ include "platform-mesh-controller.fullname" . }}
 subjects:
   - kind: ServiceAccount
-    name: platform-mesh-controller-manager
-    namespace: {{ .Release.Namespace }}
+    name: {{ include "platform-mesh-controller.serviceAccountName" . }}
+    namespace: {{ include "platform-mesh-controller.namespace" . }}
+---
+# Namespaced Role — least-privilege access for leader election and mock-API state.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "platform-mesh-controller.fullname" . }}:leaderelection
+  namespace: {{ $leNamespace }}
+  labels:
+    {{- include "platform-mesh-controller.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create, delete, get, list, patch, update, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "platform-mesh-controller.fullname" . }}:leaderelection
+  namespace: {{ $leNamespace }}
+  labels:
+    {{- include "platform-mesh-controller.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "platform-mesh-controller.fullname" . }}:leaderelection
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "platform-mesh-controller.serviceAccountName" . }}
+    namespace: {{ include "platform-mesh-controller.namespace" . }}
+{{- end }}

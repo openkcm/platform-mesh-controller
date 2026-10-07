@@ -3,6 +3,7 @@ kind: APIExport
 metadata:
   name: operations.openkcm.io
   labels:
+    {{- include "pm-integration.labels" . | nindent 4 }}
     # Marketplace/ContentConfigurations virtual-workspace filters on content-for
     # = APIExport name. Must match `operations.openkcm.io` verbatim.
     ui.platform-mesh.io/content-for: operations.openkcm.io

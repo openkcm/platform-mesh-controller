@@ -1,12 +1,13 @@
 # Grants `bind` on this provider's APIExports to the identity the Platform
 # Mesh portal uses when minting an APIBinding from the marketplace.
-# Same shape as every other provider (chat-ui, private-llm, cncf-postgres,
-# metal-api): ClusterRole gating bind + ClusterRoleBinding to system:anonymous.
-# Applied unconditionally — the portal flow requires it to work.
+# Same shape as every other provider: ClusterRole gating bind + ClusterRoleBinding
+# to system:anonymous. Applied unconditionally — the portal flow requires it.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: apiexport-bind
+  labels:
+    {{- include "pm-integration.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["apis.kcp.io"]
     resources: ["apiexports"]
@@ -16,6 +17,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: anonymous-view
+  labels:
+    {{- include "pm-integration.labels" . | nindent 4 }}
 subjects:
   - kind: User
     name: system:anonymous

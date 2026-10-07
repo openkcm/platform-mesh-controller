@@ -1,13 +1,19 @@
+global:
+  commonLabels: {}
+
+nameOverride: ""
+fullnameOverride: ""
+
 rbac:
   enabled: false
-PUBLIC_HOST: "localhost"
-PUBLIC_SCHEME: "http"
+
+publicScheme: "http"
+publicHost: "localhost"
+
 metadata:
-  enabled: true
-  # Backward-compatible account-level content path. Namespace-level content is
-  # split to avoid leaking namespace navigation into the account sidebar.
   contentPath: "/pm-content.json"
   namespaceContentPath: "/pm-content-namespace.json"
+
 branding:
   marketplace:
     title: "OpenKCM"

@@ -7,3 +7,13 @@ description: >-
 type: application
 version: 0.10.9
 appVersion: 0.10.9
+kubeVersion: ">=1.22.0-0"
+keywords:
+  - openkcm
+  - kcp
+  - platform-mesh
+sources:
+  - https://github.com/openkcm/platform-mesh-controller
+maintainers:
+  - name: OpenKCM
+    url: https://openkcm.io
