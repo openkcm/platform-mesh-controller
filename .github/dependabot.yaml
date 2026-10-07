@@ -18,7 +18,7 @@ updates:
         applies-to: version-updates
         patterns:
           - "*"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 5
   - package-ecosystem: docker
     directory: /
     reviewers:
@@ -33,7 +33,7 @@ updates:
         applies-to: version-updates
         patterns:
           - "*"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 5
   - package-ecosystem: "github-actions"
     directory: "/"
     reviewers:
@@ -48,4 +48,4 @@ updates:
         applies-to: version-updates
         patterns:
           - "*"
-    open-pull-requests-limit: 1
+    open-pull-requests-limit: 5
