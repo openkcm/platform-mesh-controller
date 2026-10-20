@@ -1,52 +1,121 @@
+# Default values for the platform-mesh-controller chart.
+#
+# The controller integrates OpenKCM into Platform Mesh. It watches the account workspaces of a
+# kcp control plane through the `operations.openkcm.io` APIExport (installed by the
+# pm-integration chart), creates a Tenant for each account that binds the APIExport, and
+# reconciles the key resources of the accounts (Tenant, DomainKey, ServiceKey, the root keys
+# for AWS, Azure and OpenBao, DataEncryptionKey) against OpenKCM. It reaches kcp with the
+# kubeconfig in `kcpKubeconfig.secretName`; in its own cluster it only keeps the state of its
+# in-pod mock API in a ConfigMap.
+#
+# Layout of this file:
+#   1. Global settings, names and labels
+#   2. Workload: replicas, image, pod and container settings, probes, resources
+#   3. kcp and OpenKCM: the kcp kubeconfig, the APIExport, the OpenKCM backends
+#   4. Kubernetes API access: service account and RBAC in the hosting cluster
+#   5. Networking and monitoring: network policy, ServiceMonitor
+#   6. Extension points: extra arguments, containers, volumes and environment variables
+#
+# Overview, upgrade notes and troubleshooting: README.md of this chart.
+#
+# Comments starting with "# --" document a value (helm-docs format).
+
+###############################################################################
+# 1. Global settings, names and labels
+###############################################################################
+
 global:
+  # -- Secrets with credentials for pulling the image from a private registry, for the pods
+  # and the ServiceAccount. Example: `[{ name: ghcr-pull-secret }]`
   imagePullSecrets: []
+  # -- Node labels the pods must be scheduled on, merged with `nodeSelector`.
   nodeSelector: {}
+  # -- PriorityClass of the pods. Empty: the cluster default.
   priorityClassName: ""
+  # -- Labels added to every resource of the chart, for example a team or cost center.
   commonLabels: {}
   rbac:
+    # -- Create the ClusterRole and ClusterRoleBinding, and the Role and RoleBinding for the
+    # controller's ServiceAccount (templates/rbac.yaml). See section 4.
     create: true
   leaderElection:
-    # Namespace for leader-election leases and mock-API ConfigMaps.
-    # Defaults to the release namespace when empty.
+    # -- Namespace of the Role and RoleBinding for leases and the mock API's state ConfigMap.
+    # Empty: the release namespace. The mock API writes its ConfigMap into the pod's own
+    # namespace, so keep it empty unless `namespace` differs from the release namespace.
     namespace: ""
 
+# -- Override the chart name. Used in resource names and in the `app.kubernetes.io/name`
+# label.
 nameOverride: ""
+
+# -- Override the full name of all resources. Default: `<release name>-platform-mesh-controller`,
+# or the release name if it contains `platform-mesh-controller`.
 fullnameOverride: ""
 
+# -- Namespace for all resources. Empty: the namespace of the Helm release.
+namespace: ""
+
+###############################################################################
+# 2. Workload
+###############################################################################
+
 image:
-  repository: ghcr.io/openkcm/platform-mesh-controller
-  tag: 0.10.9 # x-release-please-version
+  # -- Image repository, with the registry. Release images are published as
+  # `ghcr.io/openkcm/platform-mesh-controller/images/platform-mesh-controller`.
+  repository: ghcr.io/openkcm/platform-mesh-controller/images/platform-mesh-controller
+  # -- Image tag. Empty: the chart's appVersion. release-please updates it (marker).
+  tag: v0.0.3 # x-release-please-version
+  # -- Image digest, for example `sha256:0e07…`. With a tag, the image is `<tag>@<digest>`;
+  # the digest decides which image is pulled. Use a digest for reproducible deployments.
   digest: ""
+  # -- Kubernetes image pull policy: `IfNotPresent`, `Always` or `Never`.
   pullPolicy: IfNotPresent
 
+# -- Number of controller pods. Keep 1: the chart does not enable leader election, so every
+# pod would reconcile the same resources, each with its own mock API.
 replicaCount: 1
+
+# -- Number of old ReplicaSets kept for `kubectl rollout undo`.
 revisionHistoryLimit: 1
+
+# -- Deployment update strategy. Empty uses the Kubernetes default (RollingUpdate).
 strategy: {}
+
+# -- Inject environment variables for the Services of the namespace (`<SERVICE>_PORT`, …).
+# The controller does not use them.
 enableServiceLinks: false
 
-serviceAccount:
-  create: true
-  name: ""
-  annotations: {}
-  labels: {}
-  automountServiceAccountToken: true
-
 podDisruptionBudget:
+  # -- Create a PodDisruptionBudget, which limits how many pods voluntary disruptions such as
+  # node drains may take down at once. With a single replica, the default `minAvailable: 1`
+  # blocks node drains: set `maxUnavailable: 1` instead.
   enabled: false
+  # -- Minimum number or percentage of pods that must stay available. Default when neither
+  # value is set: `1`.
   # minAvailable: 1
+  # -- Maximum number or percentage of pods that may be unavailable.
   # maxUnavailable: 1
+  # -- Eviction of pods that are not ready: `IfHealthyBudget` or `AlwaysAllow`.
   # unhealthyPodEvictionPolicy: AlwaysAllow
 
+# -- Annotations for the pods. The chart adds `kubectl.kubernetes.io/default-container: manager`.
 podAnnotations: {}
+
+# -- Additional labels for the pods.
 podLabels: {}
 
-# Pod-level security context
+# -- Pod security context. The defaults run the controller as user and group 65532 (`nonroot`
+# of the distroless release image) with the runtime's default seccomp profile.
 securityContext:
   runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
   seccompProfile:
     type: RuntimeDefault
 
-# Container-level security context
+# -- Container security context. The defaults forbid privilege escalation, drop all Linux
+# capabilities and make the root filesystem read-only; `/tmp` is a writable emptyDir (see
+# `tmpVolume`).
 containerSecurityContext:
   allowPrivilegeEscalation: false
   capabilities:
@@ -54,82 +123,178 @@ containerSecurityContext:
       - ALL
   readOnlyRootFilesystem: true
 
+tmpVolume:
+  # -- Mount a writable emptyDir at `/tmp`, for example for the self-signed certificate of
+  # `--metrics-secure`. Needed with a read-only root filesystem.
+  enabled: true
+  # -- Size limit of the `/tmp` volume.
+  sizeLimit: 64Mi
+
+# -- CPU, memory and ephemeral storage of the controller container. The ephemeral-storage limit
+# covers the container's logs and the `/tmp` volume; a pod that exceeds it is evicted.
 resources:
   limits:
     cpu: 500m
     memory: 128Mi
+    ephemeral-storage: 256Mi
   requests:
     cpu: 10m
     memory: 64Mi
+    ephemeral-storage: 64Mi
 
+# -- Node labels the pods must be scheduled on. The release images are built for amd64 and
+# arm64.
 nodeSelector:
   kubernetes.io/os: linux
+
+# -- Tolerations for node taints.
 tolerations: []
+
+# -- Affinity rules, for example to spread pods across nodes.
 affinity: {}
+
+# -- Topology spread constraints, for example across zones.
 topologySpreadConstraints: []
 
 livenessProbe:
-  enabled: false
+  # -- Restart the container when `/healthz` (port `health`, 8081) no longer answers.
+  enabled: true
+  # -- Seconds after the start before the first check.
   initialDelaySeconds: 15
+  # -- Seconds between checks.
   periodSeconds: 20
+  # -- Seconds after which a check fails.
   timeoutSeconds: 5
+  # -- Consecutive successes after a failure for the check to pass again.
   successThreshold: 1
+  # -- Consecutive failures that restart the container.
   failureThreshold: 3
 
 readinessProbe:
+  # -- Take the pod out of its Service while `/readyz` (port `health`) does not answer.
   enabled: true
+  # -- Seconds after the start before the first check.
   initialDelaySeconds: 5
+  # -- Seconds between checks.
   periodSeconds: 10
+  # -- Seconds after which a check fails.
   timeoutSeconds: 5
+  # -- Consecutive successes for the pod to become ready.
   successThreshold: 1
+  # -- Consecutive failures after which the pod is not ready.
   failureThreshold: 3
 
+###############################################################################
+# 3. kcp and OpenKCM
+###############################################################################
+
 kcpKubeconfig:
+  # -- Secret with the kubeconfig of the kcp control plane, under the key `kubeconfig`,
+  # mounted at `/etc/kcp`. **Required.** Its context must point to the provider workspace of
+  # the `operations.openkcm.io` APIExport, with a user that may read the APIExportEndpointSlice
+  # and the virtual workspaces of the APIExport:
+  #   kubectl -n platform-mesh-controller-system create secret generic pm-kubeconfig \
+  #     --from-file=kubeconfig=openkcm-provider.kubeconfig
   secretName: pm-kubeconfig
 
+# -- Namespace, in each account workspace, of the Tenant that the controller creates for the
+# account, and of the account's key resources.
 tenantNamespace: default
 
 operations:
+  # -- Name of the APIExportEndpointSlice of the `operations.openkcm.io` APIExport, in the
+  # provider workspace.
   apiExportEndpointSliceName: operations.openkcm.io
 
 mockAPI:
-  # Bind to localhost so only the in-pod controller can reach it.
+  # -- Listen address of the in-pod mock OpenKCM API. The controller always starts it. Keep it
+  # on `127.0.0.1`, so that only the controller can reach it. Its state is kept in the
+  # ConfigMap `openkcm-mock-state` of the pod's namespace.
   addr: "127.0.0.1:9443"
 
 openkcmAPI:
-  # Default: in-pod mock API server. Override with a real OpenKCM/Krypton endpoint.
+  # -- OpenKCM HTTP API that the reconcilers call. Default: the in-pod mock API. The root key
+  # reconcilers (AWS, Azure, OpenBao) always use it; the others use Krypton when
+  # `krypton.grpcAddr` is set.
   url: "http://127.0.0.1:9443"
 
 krypton:
-  # host:port of Krypton's admin gRPC API. When empty, reconcilers use the mock
-  # above. The client dials in plaintext; leave empty until mTLS/bearer auth is
-  # settled against the showroom gateway.
+  # -- `host:port` of the gRPC API of the Krypton root node, for example
+  # `krypton-root.services.svc:8080`. When set, the Tenant, DomainKey, ServiceKey and
+  # DataEncryptionKey reconcilers use Krypton instead of `openkcmAPI.url`. The connection is
+  # plaintext: use it inside a service mesh with mutual TLS, to a root node without
+  # `config.auth`. Empty: the mock API.
   grpcAddr: ""
 
-extraArgs: []
-extraEnv: []
-volumes: []
-volumeMounts: []
-extraContainers: []
+###############################################################################
+# 4. Kubernetes API access
+#
+# The controller works on kcp with the credentials of `kcpKubeconfig`. In the hosting cluster
+# its ServiceAccount needs only the Role (leases, and the ConfigMap of the mock API's state).
+# The ClusterRole grants the permissions of the controller's RBAC markers (operations
+# resources, namespaces, events, APIBindings, LogicalClusters, token and access reviews).
+###############################################################################
+
+serviceAccount:
+  # -- Create a ServiceAccount for the controller. If false, `serviceAccount.name`
+  # (or `default`) must exist.
+  create: true
+  # -- Name of the ServiceAccount. Empty with `create: true`: the chart's full name.
+  name: ""
+  # -- Annotations for the ServiceAccount. Keys and values are templates.
+  annotations: {}
+  # -- Additional labels for the ServiceAccount.
+  labels: {}
+  # -- Mount the ServiceAccount token. **Required**: the mock API stores its state in a
+  # ConfigMap through the Kubernetes API.
+  automountServiceAccountToken: true
+
+###############################################################################
+# 5. Networking and monitoring
+#
+# The chart creates the Service `<full name>-metrics` with the ports `metrics` (8080,
+# `/metrics`, plain HTTP) and `health` (8081, `/healthz` and `/readyz`).
+###############################################################################
 
 prometheus:
+  # -- Allow the ServiceMonitor below.
   enabled: true
   servicemonitor:
+    # -- Create a ServiceMonitor (Prometheus Operator) for the metrics. Needs the
+    # ServiceMonitor CRD.
     enabled: false
+    # -- Not used by the templates; kept for compatibility.
     prometheusInstance: default
+    # -- Port of the Service to scrape.
     targetPort: metrics
+    # -- Path of the metrics.
     path: /metrics
+    # -- Scrape interval.
     interval: 60s
+    # -- Scrape timeout.
     scrapeTimeout: 30s
+    # -- Labels of the ServiceMonitor, for example the selector labels of your Prometheus.
     labels: {}
+    # -- Annotations of the ServiceMonitor.
     annotations: {}
+    # -- Keep the labels of the scraped metrics on conflicts.
     honorLabels: false
+    # -- Additional fields of the endpoint, for example `scheme: https` and `tlsConfig` with
+    # `--metrics-secure`.
     endpointAdditionalProperties: {}
+    # -- Namespace of the ServiceMonitor. Empty: the release namespace.
     namespace: ""
 
 networkPolicy:
+  # -- Create a NetworkPolicy for the controller pods. It allows ingress to the ports
+  # `metrics` and `health` from everywhere, plus the rules in `ingress`, and egress only as
+  # listed in `egress`.
   enabled: false
+  # -- Additional ingress rules, in NetworkPolicy syntax.
   ingress: []
+  # -- Egress rules, in NetworkPolicy syntax. The defaults allow DNS, HTTP and HTTPS (kcp,
+  # OpenKCM) and 6443 (the Kubernetes API server, for the mock API's state). Add the port of
+  # `krypton.grpcAddr` (8080) when you set it.
   egress:
     - ports:
         - port: 80
@@ -142,3 +307,36 @@ networkPolicy:
           protocol: UDP
         - port: 6443
           protocol: TCP
+
+###############################################################################
+# 6. Extension points
+###############################################################################
+
+# -- Additional arguments of the controller. The chart sets the connection flags from section 3
+# and the probe and metrics addresses. Other flags, with their defaults:
+#   --default-tenant-region=eu-central        region of the Tenants the controller creates
+#   --default-tenant-oidc-issuer=             OIDC issuer of the created Tenants
+#   --default-tenant-oidc-jwks-uri=           OIDC JWKS URI of the created Tenants
+#   --default-tenant-oidc-audiences=          comma-separated OIDC audiences of the created Tenants
+#   --metrics-secure=false                    serve the metrics over HTTPS with Kubernetes
+#                                             authentication and authorization
+#   --zap-devel=true                          development logging: console format, level debug;
+#                                             false for JSON logs with level info
+#   --zap-log-level=                          log level: debug, info or error
+# Example:
+#   - --default-tenant-region=eu10
+#   - --zap-devel=false
+extraArgs: []
+
+# -- Environment variables added to the controller container, for example
+# `MOCK_OPENKCM_STATE_CONFIGMAP`, the name of the mock API's state ConfigMap.
+extraEnv: []
+
+# -- Volumes added to the pod.
+volumes: []
+
+# -- Volume mounts added to the controller container. Do not mount anything at `/etc/kcp`.
+volumeMounts: []
+
+# -- Containers added to the pod, after the controller container.
+extraContainers: []

@@ -1,20 +1,72 @@
+# Default values for the pm-integration chart.
+#
+# The chart makes OpenKCM a provider in Platform Mesh. Install it with the kubeconfig of the
+# kcp provider workspace of OpenKCM (`helm install … --kubeconfig <kcp kubeconfig>`). It
+# creates there:
+#   - the APIExport `operations.openkcm.io`, which the accounts bind from the marketplace, and
+#     the APIResourceSchemas of its resources (templates/api-resource-schemas.yaml, generated
+#     from config/crd/bases with hack/sync-api-resource-schemas.py);
+#   - the ProviderMetadata `operations.openkcm.io`: the marketplace entry, with `branding`;
+#   - the ContentConfigurations `openkcm` and `openkcm-namespace`: the portal loads the
+#     OpenKCM microfrontend's navigation from `publicScheme://publicHost` + the content paths;
+#   - the ClusterRole `apiexport-bind` and ClusterRoleBinding `anonymous-view`, with which the
+#     portal binds the APIExport for an account, and optionally the RBAC of `rbac.enabled`.
+#
+# Layout of this file:
+#   1. Global settings, names and labels
+#   2. Portal content: the address of the microfrontend and the marketplace entry
+#   3. RBAC
+#
+# Overview and upgrade notes: README.md of this chart.
+#
+# Comments starting with "# --" document a value (helm-docs format).
+
+###############################################################################
+# 1. Global settings, names and labels
+###############################################################################
+
 global:
+  # -- Labels added to every resource of the chart.
   commonLabels: {}
 
+# -- Override the chart name, in the `app.kubernetes.io/name` label. The resource names are
+# fixed: the portal and the controller find them by name.
 nameOverride: ""
+
+# -- Not used: the resource names are fixed.
 fullnameOverride: ""
 
-rbac:
-  enabled: false
+###############################################################################
+# 2. Portal content
+###############################################################################
 
+# -- URL scheme of the microfrontend's content: `https`. `http` only for a local portal.
 publicScheme: "http"
+
+# -- Host (and port, if any) that serves the OpenKCM microfrontend's content files, for example
+# `openkcm-ui.portal.example.org`. The default `localhost` works only for a local portal.
 publicHost: "localhost"
 
 metadata:
+  # -- Path of the content file for the account workspace (navigation and pages of OpenKCM).
   contentPath: "/pm-content.json"
+  # -- Path of the content file for the namespaces of an account workspace.
   namespaceContentPath: "/pm-content-namespace.json"
 
 branding:
   marketplace:
+    # -- Name of OpenKCM in the marketplace.
     title: "OpenKCM"
+    # -- Description of OpenKCM in the marketplace.
     description: "Kubernetes cluster lifecycle and sovereign key management powered by OpenKCM."
+
+###############################################################################
+# 3. RBAC
+###############################################################################
+
+rbac:
+  # -- Create the ClusterRole and ClusterRoleBinding `syncagent-resources-access`, which grant
+  # the user `cluster-admin` of the provider workspace full access to the OpenKCM resources,
+  # namespaces and events, and read access to LogicalClusters and APIBindings. Only for setups
+  # with a sync agent that uses this user.
+  enabled: false

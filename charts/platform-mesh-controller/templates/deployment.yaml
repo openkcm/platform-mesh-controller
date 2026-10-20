@@ -112,6 +112,10 @@ spec:
             - name: kcp-kubeconfig
               mountPath: /etc/kcp
               readOnly: true
+            {{- if .Values.tmpVolume.enabled }}
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
             {{- with .Values.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -138,6 +142,13 @@ spec:
         - name: kcp-kubeconfig
           secret:
             secretName: {{ .Values.kcpKubeconfig.secretName }}
+        {{- if .Values.tmpVolume.enabled }}
+        - name: tmp
+          emptyDir:
+            {{- with .Values.tmpVolume.sizeLimit }}
+            sizeLimit: {{ . }}
+            {{- end }}
+        {{- end }}
         {{- with .Values.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

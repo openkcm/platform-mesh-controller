@@ -1,8 +1,24 @@
-pm-integration {{ .Chart.AppVersion }} deployed successfully!
+{{- $baseUrl := printf "%s://%s" (.Values.publicScheme | default "https") (.Values.publicHost | default "localhost") -}}
+pm-integration {{ .Chart.Version }} (controller {{ .Chart.AppVersion }}) is installed in the kcp workspace of the kubeconfig.
 
-APIExport     : operations.openkcm.io
-Content URL   : {{ .Values.publicScheme }}://{{ .Values.publicHost }}{{ .Values.metadata.contentPath }}
-Namespace URL : {{ .Values.publicScheme }}://{{ .Values.publicHost }}{{ .Values.metadata.namespaceContentPath }}
+APIExport          : operations.openkcm.io
+APIResourceSchemas : v{{ .Chart.Version | replace "." "-" }}-v1alpha1.<resource>.operations.openkcm.io
+Content URL        : {{ $baseUrl }}{{ .Values.metadata.contentPath }}
+Namespace URL      : {{ $baseUrl }}{{ .Values.metadata.namespaceContentPath }}
 
-Platform Mesh marketplace discovers this provider via:
-  ProviderMetadata.name = operations.openkcm.io
+The Platform Mesh marketplace finds this provider by the ProviderMetadata operations.openkcm.io.
+Check the export and its schemas:
+  kubectl get apiexport operations.openkcm.io -o jsonpath='{.spec.resources[*].schema}'
+{{- $warnings := list }}
+{{- if or (eq (.Values.publicHost | toString) "localhost") (eq (.Values.publicScheme | toString) "http") }}
+{{- $warnings = append $warnings (printf "The portal loads the OpenKCM content from %s, which only works for a local portal. Set publicScheme to https and publicHost to the host of the OpenKCM microfrontend." $baseUrl) }}
+{{- end }}
+{{- if $warnings }}
+
+WARNINGS:
+{{- range $warnings }}
+  - {{ . }}
+{{- end }}
+{{- end }}
+
+Documentation: https://github.com/openkcm/platform-mesh-controller/tree/main/charts/pm-integration

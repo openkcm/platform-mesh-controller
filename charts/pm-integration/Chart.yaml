@@ -1,12 +1,16 @@
 apiVersion: v2
 name: pm-integration
 description: >-
-  Platform Mesh portal metadata
-  (APIExport/APIResourceSchema/ProviderMetadata/ContentConfiguration) to be
-  applied in the KCP control plane.
+  OpenKCM provider metadata for Platform Mesh, applied to the kcp provider workspace: the
+  operations.openkcm.io APIExport with its APIResourceSchemas, the ProviderMetadata and
+  ContentConfigurations of the portal, and the RBAC for binding the APIExport. No workloads.
 type: application
-version: 0.10.9
-appVersion: 0.10.9
+# Version of the chart. Increment it for every change to the chart. The APIResourceSchemas are
+# named after it (v<version>-v1alpha1.<resource>), because kcp schemas cannot change.
+version: 0.11.0
+# Controller release whose CRDs the APIResourceSchemas are generated from. release-please updates
+# it (marker).
+appVersion: "0.0.3" # x-release-please-version
 kubeVersion: ">=1.22.0-0"
 keywords:
   - openkcm

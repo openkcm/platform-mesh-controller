@@ -1,19 +1,48 @@
-platform-mesh-controller {{ .Chart.AppVersion }} deployed successfully!
+platform-mesh-controller {{ .Values.image.tag | default .Chart.AppVersion }} is deployed as {{ include "platform-mesh-controller.fullname" . }} in namespace {{ include "platform-mesh-controller.namespace" . }}.
 
-  Namespace : {{ include "platform-mesh-controller.namespace" . }}
-  Workload  : {{ include "platform-mesh-controller.fullname" . }}
-
-Check pod status:
-  kubectl get pods -n {{ include "platform-mesh-controller.namespace" . }} \
-    -l "app.kubernetes.io/name={{ include "platform-mesh-controller.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
-
-KCP APIExport endpoint : {{ .Values.operations.apiExportEndpointSliceName }}
+kcp kubeconfig : Secret {{ .Values.kcpKubeconfig.secretName }}, key kubeconfig
+APIExport      : endpoint slice {{ .Values.operations.apiExportEndpointSliceName }}
 {{- if .Values.krypton.grpcAddr }}
-Krypton gRPC           : {{ .Values.krypton.grpcAddr }}
-{{- else }}
-Mock API               : {{ .Values.mockAPI.addr }} (in-pod, no external network exposure)
+Krypton        : {{ .Values.krypton.grpcAddr }} (Tenant, DomainKey, ServiceKey, DataEncryptionKey)
 {{- end }}
+OpenKCM API    : {{ .Values.openkcmAPI.url }}{{ if hasPrefix "http://127.0.0.1" .Values.openkcmAPI.url }} (in-pod mock API){{ end }}
+Metrics        : service/{{ include "platform-mesh-controller.fullname" . }}-metrics, port metrics
 {{- if and .Values.prometheus.enabled .Values.prometheus.servicemonitor.enabled }}
-
-A ServiceMonitor has been created in namespace "{{ .Values.prometheus.servicemonitor.namespace | default (include "platform-mesh-controller.namespace" .) }}".
+ServiceMonitor : in namespace {{ .Values.prometheus.servicemonitor.namespace | default (include "platform-mesh-controller.namespace" .) }}
 {{- end }}
+
+Check the pods and the controller's log:
+  kubectl get pods -n {{ include "platform-mesh-controller.namespace" . }} -l "app.kubernetes.io/name={{ include "platform-mesh-controller.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+  kubectl logs -n {{ include "platform-mesh-controller.namespace" . }} deployment/{{ include "platform-mesh-controller.fullname" . }}
+{{- $warnings := list }}
+{{- if not .Values.kcpKubeconfig.secretName }}
+{{- $warnings = append $warnings "kcpKubeconfig.secretName is empty: the pod cannot start. Set the Secret with the kcp kubeconfig." }}
+{{- end }}
+{{- if hasPrefix "http://127.0.0.1" .Values.openkcmAPI.url }}
+{{- if .Values.krypton.grpcAddr }}
+{{- $warnings = append $warnings "openkcmAPI.url is the in-pod mock API: the root key reconcilers (AWS, Azure, OpenBao) do not reach OpenKCM." }}
+{{- else }}
+{{- $warnings = append $warnings "openkcmAPI.url is the in-pod mock API and krypton.grpcAddr is empty: all reconcilers use the mock. For development and demos only." }}
+{{- end }}
+{{- end }}
+{{- if not .Values.serviceAccount.automountServiceAccountToken }}
+{{- $warnings = append $warnings "serviceAccount.automountServiceAccountToken is false: the mock API cannot keep its state in its ConfigMap and loses it on restart." }}
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- $warnings = append $warnings "replicaCount is greater than 1: the chart does not enable leader election, so every pod reconciles the same resources." }}
+{{- end }}
+{{- if and .Values.podDisruptionBudget.enabled (eq (int .Values.replicaCount) 1) (not (hasKey .Values.podDisruptionBudget "maxUnavailable")) }}
+{{- $warnings = append $warnings "The PodDisruptionBudget keeps the only pod available (minAvailable: 1): node drains are blocked. Set podDisruptionBudget.maxUnavailable: 1." }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.krypton.grpcAddr }}
+{{- $warnings = append $warnings "networkPolicy.enabled is true and krypton.grpcAddr is set: make sure networkPolicy.egress allows the port of Krypton." }}
+{{- end }}
+{{- if $warnings }}
+
+WARNINGS:
+{{- range $warnings }}
+  - {{ . }}
+{{- end }}
+{{- end }}
+
+Documentation: https://github.com/openkcm/platform-mesh-controller/tree/main/charts/platform-mesh-controller

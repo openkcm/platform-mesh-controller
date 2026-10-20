@@ -64,6 +64,13 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+# Helm chart unit tests: render charts/platform-mesh-controller and charts/pm-integration with
+# `helm template`, check the controller's flags and the schemas against the CRDs. Needs the helm
+# command, no cluster.
+.PHONY: helm-test
+helm-test: ## Run the Helm chart unit tests.
+	go test -count=1 -race -tags=helmtests ./helm-tests/unit/...
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
