@@ -19,9 +19,9 @@ Static secret: the customer hands over an access key (ID and secret). Identity p
 from an identity provider. Certificate: Krypton shows a certificate.
 
 Every method is documented here, but not every method is implemented on day one: the implementation takes them one
-by one by priority. The methods with a secret from the customer (the access key, identity providers A and C, and
-certificate A) also wait for the secret hand-off to Krypton (see Common rules). Identity provider B and certificate
-B do not, but need a public cluster issuer or the Platform Mesh PKI.
+by one by priority. The methods that send a secret to Krypton (the access key, identity providers A and C, and
+certificates A and B) also wait for the secret hand-off to Krypton (see Common rules). Identity provider B needs a
+public cluster issuer, and certificate B needs cert-manager with the Platform Mesh PKI.
 
 OpenKCM runs nothing in AWS and needs no AWS account of its own. Every AWS resource below is created in the
 customer's account by a template the customer deploys. Krypton only calls the public AWS endpoints of the
@@ -40,19 +40,21 @@ They explain each method and are examples only: that part is designed by the Kry
   The registration check depends on it (see the last section).
 - **Setup data:** for every method, when the draft AWSRootKey appears, the controller asks Krypton for the setup
   data and writes it into the AWSRootKey status (`status.setupData`). The UI fills the template only from
-  the status and from what the customer typed into the draft. What the setup data contains depends on the method.
+  the status and from what the customer typed in the form. What the setup data contains depends on the method.
 - **Template values first:** the role in every template names the customer's key, so the UI asks for the KMS key
   ARN and region, and any other value the template needs, before it shows the template.
-- **Secrets in the CR:** a value the customer gives that is secret goes into a Kubernetes Secret in the customer's
-  kcp workspace, created by the UI. The AWSRootKey only references it (`secretRef` with `name` and `namespace`).
-  No secret value is ever written into an AWSRootKey, its status, a log or an event. The entry names inside the
-  Secret are fixed per method and listed in each section.
-- **Secret hand-off to Krypton (open):** the target is that nothing unencrypted is stored at Krypton and nothing
-  unencrypted travels to it. Transit counts because the controller and Krypton may run in different places. The
-  plan is that the controller encrypts the Secret with a public key taken from Krypton. That needs a Krypton
-  endpoint that does not exist yet and is not agreed with the Krypton team. For now the value stays in the
-  Kubernetes Secret as is, with no extra encryption by the UI or the controller, and how it reaches Krypton is
-  open. Each "What the controller sends" below names the secret as part of the call without fixing its form.
+- **Secrets:** all credentials of a method go into one Kubernetes Secret: the secret value and the identifiers that
+  belong to it (access key ID, client ID, user name, certificates). The UI creates it in the customer's kcp workspace
+  and labels it with the AWSRootKey's UID. The AWSRootKey only references it (`secretRef` with `name` and
+  `namespace`). No secret value is ever written into an AWSRootKey, its status, a log or an event. The entry names
+  are fixed per method and listed in each section.
+- **Secret hand-off to Krypton (open):** the target is that nothing unencrypted is stored at Krypton or travels to it.
+  The plan is that the controller encrypts the Secret with a public key taken from Krypton; that endpoint does not
+  exist yet and is not agreed with the Krypton team. For now the value stays in the Kubernetes Secret as is, and how
+  it reaches Krypton is open.
+- **Secret changes:** the controller watches the labelled Secrets. When one changes (the customer replaces a value,
+  or cert-manager renews a certificate), it tells Krypton that the root key has new credentials (working name, the
+  API is designed by the Krypton team).
 - **After the key is Active** the KMS key ARN, region and method do not change: a different key is a different
   root key.
 - **CRD change:** the `auth` block and `status.setupData` are new in the AWSRootKey CRD, so that one kind holds
@@ -69,12 +71,13 @@ They explain each method and are examples only: that part is designed by the Kry
 
 | Building block | Needed by | Offered today |
 |---|---|---|
-| Kubernetes Secret in the customer's kcp workspace | access key, customer's IdPs, customer's certificate | yes |
-| Hand-off of that Secret to Krypton, not in plain text | access key, customer's IdPs, customer's certificate | no |
-| Public service-account issuer of the cluster where Krypton runs | Kubernetes service account | no, see below |
-| OpenBao PKI with a CA for the tenant | Platform Mesh PKI | no |
+| Secret in the customer's kcp workspace | access key, customer's IdPs, customer's certificate | yes |
+| Controller may read and watch those Secrets (APIExport claim on `secrets`) | the same | no |
+| Hand-off of the credentials to Krypton, not in plain text | the same, and the Platform Mesh PKI | no |
+| Public service-account issuer of the Krypton cluster | Kubernetes service account | not confirmed (Gardener can) |
+| OpenBao PKI with a CA, and cert-manager with an issuer for it in the controller's cluster | Platform Mesh PKI | no |
 
-The hand-off is described in Common rules. A Gardener extension can publish the service-account issuer.
+The hand-off is described in Common rules.
 
 ## Step 0. Tenant creation (the same for every method)
 
@@ -120,7 +123,9 @@ write to the Secret keeps them in step.
 5. The stack returns the role ARN and the user name.
 6. The customer creates an access key for that user: `aws iam create-access-key --user-name <user name>`. AWS
    prints the access key ID and the secret once.
-7. The customer enters the access key ID, the secret and the role ARN in the UI.
+7. The customer enters the access key ID, the secret and the role ARN in the UI. The UI first creates the Secret
+   with the access key ID and the secret, then saves the role ARN and `secretRef` to the AWSRootKey. That completes
+   the key and starts registration.
 
 **What the template creates** in the customer's AWS account:
 - **An IAM user** with no console login. It only holds the access key, and its only permission is to assume the
@@ -232,7 +237,7 @@ secret. Krypton gets a token from the customer's identity provider and shows it 
 | 1 | KMS key ARN | the customer's KMS key | no | `spec.keyUri` | 2 |
 | 2 | Region of the key | the customer's KMS key | no | `spec.region` | 2 |
 | 3 | Issuer address | the customer's identity provider | no | `spec.auth.webIdentity.issuerUrl` | 2 |
-| 4 | Client ID | the application registered for OpenKCM | no | `spec.auth.webIdentity.clientId` | 2 |
+| 4 | Client ID | the application registered for OpenKCM | no | Secret entry `clientId` | 2 |
 | 5 | Audience | set by the customer in the application | no | `spec.auth.webIdentity.audience` | 2 |
 | 6 | Role ARN | output of the template's stack | no | `spec.auth.webIdentity.roleArn` | 5 |
 | 7 | Token endpoint | the customer's identity provider | no | `spec.auth.webIdentity.tokenEndpoint` | 5 |
@@ -240,18 +245,23 @@ secret. Krypton gets a token from the customer's identity provider and shows it 
 
 Not typed by the customer: `spec.tenantNameRef`, `spec.auth.method: WebIdentity` and
 `spec.auth.webIdentity.issuer: Customer` (set by the UI with the draft), and `spec.auth.webIdentity.secretRef`
-(set when the UI creates the Secret from value 8).
+(set when the UI creates the Secret from values 4 and 8). The client ID is not secret but sits in the Secret with
+the client secret, so the credentials are in one place and a rotation is one write. The template needs the client
+ID in step 4, so the customer enters it in step 2 and the UI keeps it in the form until it creates the Secret in
+step 5; the draft AWSRootKey does not hold it.
 
 **What the customer does:**
 1. In their identity provider, registers an application for OpenKCM that may get tokens with the client
    credentials grant, and notes the issuer address, the token endpoint, the client ID, the client secret and the
    audience.
 2. In the UI, picks AWS KMS with OIDC (own identity provider) and enters the KMS key ARN, region, issuer address,
-   client ID and audience. Draft created.
+   client ID and audience. Draft created with all of them except the client ID.
 3. The controller asks Krypton for the setup data: the encryption context. It writes it into the status.
 4. The UI gives the template filled in with the key ARN, the issuer address, the client ID as the subject, the
    audience and the encryption context.
-5. The customer deploys it and enters in the UI the role ARN, the token endpoint and the client secret.
+5. The customer deploys it and enters in the UI the role ARN, the token endpoint and the client secret. The UI
+   first creates the Secret with the client ID and the client secret, then saves the role ARN, the token endpoint
+   and `secretRef` to the AWSRootKey. That completes the key and starts registration.
 
 **To verify per identity provider:** the template uses the client ID as the subject. The `sub` claim of a
 client-credentials token is not always the client ID (some providers put another identifier in `sub` and the client
@@ -259,9 +269,9 @@ ID in `azp`), and AWS may use `azp` instead of `aud` when it is present. The tem
 provider really puts into the token.
 
 **Where the values are kept:**
-- Client secret: created by the customer in their identity provider. Kept in a Kubernetes Secret in the kcp
-  workspace, created by the UI in step 5. The AWSRootKey holds only the reference.
-- Issuer address, token endpoint, client ID, audience: from the customer's identity provider, kept in the spec.
+- Client ID and client secret: from the application the customer registered in their identity provider. Kept in a
+  Kubernetes Secret in the kcp workspace, created by the UI in step 5. The AWSRootKey holds only the reference.
+- Issuer address, token endpoint, audience: from the customer's identity provider, kept in the spec.
 - Role ARN: returned by the stack, kept in the spec.
 
 **Example:**
@@ -282,7 +292,6 @@ spec:
       issuer: Customer
       issuerUrl: https://idp.example.com/acme
       tokenEndpoint: https://idp.example.com/acme/oauth2/token
-      clientId: openkcm-acme
       audience: sts.amazonaws.com
       roleArn: arn:aws:iam::123456789012:role/openkcm-l1-access
       secretRef:
@@ -303,6 +312,7 @@ metadata:
   namespace: default
 type: Opaque
 stringData:
+  clientId: "<client ID>"
   clientSecret: "<client secret>"
 ```
 
@@ -310,8 +320,8 @@ stringData:
 endpoint, the client ID, the audience and the client secret (how the secret reaches Krypton is open, see Common
 rules).
 
-**Required from Platform Mesh:** a Kubernetes Secret in the customer's workspace for the client secret, and a way
-to hand it to Krypton without plain text (open). Nothing else; the identity provider is the customer's.
+**Required from Platform Mesh:** a Kubernetes Secret in the customer's workspace for the client ID and secret, and a
+way to hand them to Krypton without plain text (open). Nothing else; the identity provider is the customer's.
 
 **How Krypton authenticates (example):** it asks the customer's token endpoint for a token (client credentials
 grant, with the client ID and secret), sends the token to STS, and STS checks it against the customer's issuer.
@@ -418,26 +428,30 @@ signed SAML response, and exchanges it at AWS STS for temporary credentials.
 | 2 | Region of the key | the customer's KMS key | no | `spec.region` | 2 |
 | 3 | Identity provider metadata (XML) | the customer's identity provider | no | `spec.auth.saml.idpMetadataXml` | 2 |
 | 4 | ECP login address | the customer's identity provider | no | `spec.auth.saml.ecpUrl` | 2 |
-| 5 | Service user name | the user created for OpenKCM | no | `spec.auth.saml.username` | 2 |
+| 5 | Service user name | the user created for OpenKCM | no | Secret entry `username` | 6 |
 | 6 | SAML provider ARN | output of the template's stack | no | `spec.auth.saml.providerArn` | 6 |
 | 7 | Role ARN | output of the template's stack | no | `spec.auth.saml.roleArn` | 6 |
 | 8 | Service user password | the user created for OpenKCM | yes | Secret entry `password` | 6 |
 
-Not typed by the customer: `spec.tenantNameRef`, `spec.auth.method: SAML` and `spec.auth.saml.secretRef`.
+Not typed by the customer: `spec.tenantNameRef`, `spec.auth.method: SAML` and `spec.auth.saml.secretRef` (set when
+the UI creates the Secret from values 5 and 8). The user name is not secret but sits in the Secret with the
+password: they are one credential, and a rotation is one write.
 
 **What the customer does:**
 1. In their identity provider, creates an application for AWS with ECP allowed, and a service user for OpenKCM with
    a password and without MFA. Downloads the metadata.
-2. In the UI, picks AWS KMS with SAML and enters values 1 to 5. Draft created.
+2. In the UI, picks AWS KMS with SAML and enters values 1 to 4. Draft created.
 3. The controller asks Krypton for the setup data: the encryption context. It writes it into the status.
 4. The customer deploys the filled-in template. The stack returns the SAML provider ARN and the role ARN.
 5. In the AWS application of their identity provider, the customer gives the service user that role (both ARNs).
-6. The customer enters the two ARNs and the password in the UI.
+6. The customer enters the two ARNs, the user name and the password in the UI. The UI first creates the Secret with
+   the user name and the password, then saves the two ARNs and `secretRef` to the AWSRootKey. That completes the
+   key and starts registration.
 
 **What the template creates** in the customer's AWS account: a SAML provider with the metadata, and an IAM role
 with the same KMS rights as in the other methods that trusts only that SAML provider.
 
-**Where the values are kept:** the password in a Kubernetes Secret, everything else in the spec.
+**Where the values are kept:** the user name and the password in a Kubernetes Secret, everything else in the spec.
 
 **Example:**
 
@@ -456,7 +470,6 @@ spec:
     saml:
       idpMetadataXml: "<identity provider metadata XML>"
       ecpUrl: https://idp.example.com/idp/profile/SAML2/SOAP/ECP
-      username: openkcm-acme
       providerArn: arn:aws:iam::123456789012:saml-provider/acme-idp
       roleArn: arn:aws:iam::123456789012:role/openkcm-l1-access
       secretRef:
@@ -477,14 +490,15 @@ metadata:
   namespace: default
 type: Opaque
 stringData:
+  username: "<service user name>"
   password: "<service user password>"
 ```
 
 **What the controller sends:** the method, the tenant ID, the key ARN, the region, the two ARNs, the ECP login
 address, the user name and the password (how the password reaches Krypton is open, see Common rules).
 
-**Required from Platform Mesh:** a Kubernetes Secret in the customer's workspace for the password, and a way to
-hand it to Krypton without plain text (open).
+**Required from Platform Mesh:** a Kubernetes Secret in the customer's workspace for the user name and password, and
+a way to hand them to Krypton without plain text (open).
 
 **How Krypton authenticates (example):** it logs in at the ECP login address with the user name and password and
 gets a signed SAML response. It sends the response and the two ARNs to STS (`AssumeRoleWithSAML`), which checks it
@@ -530,33 +544,40 @@ the certificate and its private key. This is the "static certificate" case.
 |---|---|---|---|---|---|
 | 1 | KMS key ARN | the customer's KMS key | no | `spec.keyUri` | 2 |
 | 2 | Region of the key | the customer's KMS key | no | `spec.region` | 2 |
-| 3 | CA certificate (PEM) | the customer's PKI | no | `spec.auth.rolesAnywhere.caCertificatePem` | 2 |
+| 3 | CA certificate (PEM) | the customer's PKI | no | Secret entry `ca.crt` | 2 |
 | 4 | Subject CN of the client certificate | the customer's PKI | no | `spec.auth.rolesAnywhere.subjectCn` | 2 |
 | 5 | Trust anchor ARN | output of the template's stack | no | `spec.auth.rolesAnywhere.trustAnchorArn` | 5 |
 | 6 | Profile ARN | output of the template's stack | no | `spec.auth.rolesAnywhere.profileArn` | 5 |
 | 7 | Role ARN | output of the template's stack | no | `spec.auth.rolesAnywhere.roleArn` | 5 |
-| 8 | Client certificate (PEM) | the customer's PKI | no | `spec.auth.rolesAnywhere.certificatePem` | 5 |
-| 9 | Client private key (PEM) | the customer's PKI | yes | Secret entry `privateKey` | 5 |
+| 8 | Client certificate (PEM) | the customer's PKI | no | Secret entry `tls.crt` | 5 |
+| 9 | Client private key (PEM) | the customer's PKI | yes | Secret entry `tls.key` | 5 |
 
 Not typed by the customer: `spec.tenantNameRef`, `spec.auth.method: RolesAnywhere` and
 `spec.auth.rolesAnywhere.certificateSource: Customer` (set by the UI with the draft), and
-`spec.auth.rolesAnywhere.secretRef` (set when the UI creates the Secret from value 9). Values 5 to 7 are saved
-together or not at all.
+`spec.auth.rolesAnywhere.secretRef` (set when the UI creates the Secret from values 3, 8 and 9). Values 5 to 7 are
+saved together or not at all. The three certificate values sit in one Secret of type `kubernetes.io/tls`, the
+standard Kubernetes format for a certificate with its key; the CA certificate is its `ca.crt` entry. Only the key is
+secret. The template needs the CA certificate in step 4, so the customer gives it in step 2 and the UI keeps it in
+the form until it creates the Secret in step 5; the draft AWSRootKey does not hold it.
 
 **What the customer does:**
 1. In their own PKI, issues a client certificate for OpenKCM and keeps the CA certificate, the client certificate
    and the client private key.
 2. In the UI, picks AWS KMS with Roles Anywhere (own certificate) and enters the KMS key ARN, region, the CA
-   certificate and the subject CN of the client certificate. Draft created.
+   certificate and the subject CN of the client certificate. Draft created with all of them except the CA
+   certificate.
 3. The controller asks Krypton for the setup data: the encryption context. It writes it into the status.
 4. The UI gives the template filled in with the key ARN, the CA certificate, the subject CN and the encryption
    context.
 5. The customer deploys it and enters in the UI the three ARNs, the client certificate and the client private key.
+   The UI first creates the Secret with the client certificate, the private key and the CA certificate, then saves
+   the three ARNs and `secretRef` to the AWSRootKey. That completes the key and starts registration.
 
 **Where the values are kept:**
-- Client private key: from the customer's PKI. Kept in a Kubernetes Secret in the kcp workspace, created by the UI
-  in step 5. The AWSRootKey holds only the reference.
-- CA certificate, client certificate, subject CN: from the customer's PKI, public, kept in the spec.
+- Client certificate, client private key and CA certificate: from the customer's PKI. Kept in one Kubernetes Secret
+  of type `kubernetes.io/tls` in the kcp workspace, created by the UI in step 5. The AWSRootKey holds only the
+  reference.
+- Subject CN: from the customer's PKI, public, kept in the spec.
 - Three ARNs: returned by the stack, kept in the spec.
 
 **Example:**
@@ -575,15 +596,7 @@ spec:
     method: RolesAnywhere
     rolesAnywhere:
       certificateSource: Customer
-      caCertificatePem: |
-        -----BEGIN CERTIFICATE-----
-        MIIB...
-        -----END CERTIFICATE-----
       subjectCn: openkcm-acme
-      certificatePem: |
-        -----BEGIN CERTIFICATE-----
-        MIIC...
-        -----END CERTIFICATE-----
       trustAnchorArn: arn:aws:rolesanywhere:eu-central-1:123456789012:trust-anchor/00000000-0000-0000-0000-000000000001
       profileArn: arn:aws:rolesanywhere:eu-central-1:123456789012:profile/00000000-0000-0000-0000-000000000002
       roleArn: arn:aws:iam::123456789012:role/openkcm-l1-access
@@ -603,16 +616,20 @@ kind: Secret
 metadata:
   name: acme-client-cert-key
   namespace: default
-type: Opaque
+type: kubernetes.io/tls
 stringData:
-  privateKey: "<client private key, PEM>"
+  tls.crt: "<client certificate, PEM>"
+  tls.key: "<client private key, PEM>"
+  ca.crt: "<CA certificate, PEM>"
 ```
 
 **What the controller sends:** the method, the tenant ID, the key ARN, the region, the three ARNs, the client
-certificate and the client private key (how the key reaches Krypton is open, see Common rules).
+certificate and the client private key (how the key reaches Krypton is open, see Common rules). The CA certificate
+stays in the Secret: only the template needs it.
 
-**Required from Platform Mesh:** a Kubernetes Secret in the customer's workspace for the client private key, and a
-way to hand it to Krypton without plain text (open). No PKI on our side.
+**Required from Platform Mesh:** a Kubernetes Secret in the customer's workspace for the client certificate, the
+private key and the CA certificate, and a way to hand the key to Krypton without plain text (open). No PKI on our
+side.
 
 **How Krypton authenticates (example):** it signs `CreateSession` with the private key, sending the client
 certificate and the three ARNs. Roles Anywhere checks the signature and the certificate against the trust
@@ -630,8 +647,17 @@ deletes the role.
 ### B. Platform Mesh PKI
 
 **Who the CA is:** the Platform Mesh PKI (OpenBao). OpenKCM does not build or run a CA of its own. The customer
-gets the CA's public certificate from the setup data and puts it into AWS. Krypton gets short-lived certificates
-from that CA.
+does not provide the certificate: Platform Mesh generates it. The controller creates a cert-manager `Certificate`
+whose issuer is the Platform Mesh PKI, and cert-manager writes the short-lived certificate and its key into a Secret
+of type `kubernetes.io/tls`, renewing it before it expires. The `Certificate` and the Secret live in the cluster where
+the controller runs (a normal Kubernetes cluster, where cert-manager can run; a kcp workspace has no workloads), in a
+namespace owned by the platform. The customer never sees or touches them. The AWSRootKey does not point at the
+Secret: the controller derives its location from the AWSRootKey and shows it in the status. Krypton cannot fetch a
+certificate from Platform Mesh itself, so the controller reads the Secret and sends the certificate to Krypton. The
+customer puts the CA's public certificate into AWS.
+
+The placement of the `Certificate` and the Secret, and the missing `secretRef`, are required for this method and
+are to be confirmed with the Platform Mesh team (see the end of this section).
 
 **What the customer provides:**
 
@@ -644,20 +670,40 @@ from that CA.
 | 5 | Role ARN | output of the template's stack | no | `spec.auth.rolesAnywhere.roleArn` | 5 |
 
 Not typed by the customer: `spec.tenantNameRef`, `spec.auth.method: RolesAnywhere` and
-`spec.auth.rolesAnywhere.certificateSource: PlatformMesh` (set by the UI with the draft). There is no secret and no
-`secretRef`. The CA certificate, expected subject CN and not-after date come from Krypton as setup data and go into
-the template. Values 3 to 5 are saved together or not at all.
+`spec.auth.rolesAnywhere.certificateSource: PlatformMesh` (set by the UI with the draft). The customer gives no
+secret, and there is no `secretRef` in the spec: the controller derives where the Secret is and shows it in the
+status (field name to be agreed), so the customer cannot point the controller at another Secret. The CA
+certificate, expected subject CN and not-after date go into the template as setup data. Values 3 to 5 are saved
+together or not at all.
 
 **What the customer does:**
 1. In the UI, picks AWS KMS with Roles Anywhere (Platform Mesh PKI) and enters the KMS key ARN and region. Draft
    created.
-2. The controller asks Krypton for the setup data. Repeating the call returns the same result.
-3. Krypton returns four values: the CA certificate (PEM), the expected subject CN, the encryption context and the
-   not-after date of the CA. The controller writes them into the status.
+2. The controller creates the cert-manager `Certificate` for this root key (see the example below) and asks Krypton
+   for the setup data. Repeating the call returns the same result. Meanwhile the platform issues the certificate,
+   with no customer action and no call from the controller:
+   - cert-manager picks up the `Certificate` and asks the issuer named in `issuerRef` for a client certificate with
+     the subject CN from the `Certificate`.
+   - The issuer is backed by the Platform Mesh PKI (OpenBao), which signs with its CA and returns the certificate and
+     the CA certificate. cert-manager's Vault issuer type is the likely fit, because OpenBao keeps Vault's API. How
+     cert-manager logs in to OpenBao is the platform's concern: the controller never talks to OpenBao and holds no
+     address or credential for it.
+   - cert-manager writes the Secret (`tls.crt`, `tls.key`, `ca.crt`) with the label of the AWSRootKey's UID, and
+     renews it before it expires (8 hours before, in the example below).
+   - The controller finds the Secret by that label and sets `CertificateReady: True`. While the certificate is not
+     issued, the status shows `CertificateReady: False` with the reason, such as the Platform Mesh PKI being
+     unreachable (the reason can be taken from the `Certificate`'s own condition).
+3. The setup data has four values: the encryption context, the CA certificate (PEM), the expected subject CN and the
+   not-after date of the CA. The controller writes them into the status. Where the last three come from (Krypton or
+   the generated Secret) is open, see below.
 4. The UI gives the template filled in with the key ARN and the four values. The customer types nothing into it.
 5. The customer deploys it and enters the three ARNs.
+6. The three ARNs complete the key. When the certificate is issued, the controller registers the root key (see the
+   last section).
 
-**Where the values are kept:** nothing secret. CA data in the status; key ARN, region and three ARNs in the spec.
+**Where the values are kept:** the customer provides nothing secret. The certificate and key are in the Secret that
+cert-manager creates in the controller's cluster; CA data and the Secret reference in the status; key ARN, region and
+three ARNs in the spec.
 
 **Example:**
 
@@ -679,6 +725,13 @@ spec:
       profileArn: arn:aws:rolesanywhere:eu-central-1:123456789012:profile/00000000-0000-0000-0000-000000000002
       roleArn: arn:aws:iam::123456789012:role/openkcm-l1-access
 status:
+  conditions:
+  - type: CertificateReady
+    status: "True"
+  clientCertificate:
+    secretRef:
+      name: awsrootkey-7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+      namespace: openkcm-platform
   setupData:
     encryptionContext: openkcm:tenant=3f2a9c1e-7b4d-4e8a-9c61-2d5f0a7b8e13
     caCertificatePem: |
@@ -689,22 +742,95 @@ status:
     notAfter: "2027-10-14T00:00:00Z"
 ```
 
-**What the controller sends:** the method, the tenant ID, the key ARN, the region and the three ARNs.
+The `Certificate` the controller creates for this root key, in the cluster where it runs:
 
-**Required from Platform Mesh:** the OpenBao PKI with a CA for the tenant, short-lived certificates for Krypton,
-and the CA certificate available as setup data. No secret.
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: awsrootkey-7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+  namespace: openkcm-platform
+spec:
+  secretName: awsrootkey-7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+  commonName: openkcm-3f2a9c1e
+  usages:
+  - digital signature
+  - client auth
+  duration: 24h
+  renewBefore: 8h
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: tenant-3f2a9c1e
+  secretTemplate:
+    labels:
+      openkcm.io/awsrootkey-uid: 7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+```
 
-**How Krypton authenticates (example):** it gets a 24-hour certificate for this tenant from the tenant's CA, signs
-`CreateSession` with its private key, and Roles Anywhere and STS check it as in variant A.
+- The names derive from the AWSRootKey's UID, not its name: two workspaces can both have an `acme-aws-root`.
+- `commonName` is the subject CN that the customer's role pins. The customer does not choose it.
+- `usages` lists `digital signature` next to `client auth` because Roles Anywhere expects the digital-signature key
+  usage on the client certificate, and cert-manager's list replaces its defaults.
+- `ca.crt` in the Secret and `caCertificatePem` in `status.setupData` are the same CA certificate. The status copy
+  lets the UI fill the template without reading the Secret that holds the private key.
+- `secretTemplate` puts the label on the Secret. The controller watches Secrets by this label, not every Secret.
+- The issuer is one per tenant if the CA is per tenant (open, see below).
+- Names, namespace, label key and lifetimes are illustrative; the platform chooses them.
+- When the AWSRootKey is deleted, a finalizer on it deletes the `Certificate` and the Secret first. An
+  ownerReference cannot span the kcp workspace and the controller's cluster.
+
+The Secret cert-manager creates from it:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: awsrootkey-7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+  namespace: openkcm-platform
+  labels:
+    openkcm.io/awsrootkey-uid: 7c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f
+type: kubernetes.io/tls
+stringData:
+  tls.crt: "<client certificate, PEM>"
+  tls.key: "<client private key, PEM>"
+  ca.crt: "<CA certificate, PEM>"
+```
+
+**What the controller sends:** the method, the tenant ID, the key ARN, the region, the three ARNs, the client
+certificate and the client private key from the Secret (how the key reaches Krypton is open, see Common rules). When
+cert-manager renews the certificate, the controller sends the new one (see Secret changes).
+
+**Required from Platform Mesh:** the OpenBao PKI with a CA (per tenant or shared, open), cert-manager with an issuer
+for that PKI in the cluster where the controller runs, and a way to hand the private key to Krypton without plain
+text (open). Neither the PKI nor cert-manager is offered on Platform Mesh today. The customer gives no secret.
+
+**How Krypton authenticates (example):** it signs `CreateSession` with the private key it got from the controller,
+sending the certificate and the three ARNs, and Roles Anywhere and STS check it as in variant A.
 
 **Tenant isolation:** the role trusts only certificates with this tenant's subject CN and allows only this
-tenant's encryption context.
-**Advantage:** no secret from the customer and nothing long-lived at OpenKCM: the certificates live 24 hours. The
-customer enters only the three ARNs.
-**Downside:** depends on the PKI in Platform Mesh. The customer must update the trust anchor
-before the CA's not-after date, otherwise Krypton loses access to the key. A trust anchor can hold two
-certificates, so old and new can overlap.
+tenant's encryption context. Platform Mesh sets the CN in the `Certificate`; the customer cannot choose it and
+cannot reach the `Certificate` or its Secret.
+**Advantage:** no secret from the customer and no long-lived credential: the certificates are short-lived and
+renewed automatically. The customer enters only the three ARNs.
+**Downside:** depends on the PKI and cert-manager in Platform Mesh, and every renewal must reach Krypton through the
+controller. The customer must update the trust anchor before the CA's not-after date, otherwise Krypton loses access
+to the key. A trust anchor can hold two certificates, so old and new can overlap.
 **Cut-off:** the customer disables the trust anchor or deletes the role.
+
+**Required for this method (to confirm with the Platform Mesh team):**
+- The `Certificate` and its Secret live in the cluster where the controller runs, not in the customer's workspace, so
+  the customer never holds Krypton's private key. The controller then needs a client for its own cluster and the
+  right to manage `certificates` and `secrets` there.
+- No `secretRef` in the spec. The controller derives the Secret's name from the AWSRootKey's UID and shows the
+  reference in the status. Otherwise a customer-editable pointer into the platform's cluster would let a customer
+  make the controller read another Secret.
+
+**Open (Platform Mesh side), to settle before this variant is built:**
+- Whether the cluster where the controller runs has cert-manager with a reachable issuer for the Platform Mesh PKI.
+- Where the CA certificate, the subject CN and the not-after date come from: Krypton, or the generated Secret
+  (`ca.crt`, and the CN the controller put into the `Certificate`).
+- One CA per tenant, or one shared CA with a subject CN per tenant. With a shared CA, tenant isolation rests on the
+  CN check in the role alone.
 
 ## Quick comparison
 
@@ -715,7 +841,7 @@ For every method the customer also enters the KMS key ARN and region.
 | 1. Static secret | A. Access key | access key ID, secret, role ARN | yes, access key |
 | 2. Identity provider | A. Customer's IdP (OIDC) | issuer, audience, client ID, token URL, secret, role ARN | yes |
 | | B. Kubernetes service account (OIDC) | role ARN | no |
-| | C. Customer's SAML IdP | metadata, ECP address, user name, password, 2 ARNs | yes, password |
+| | C. Customer's SAML IdP | metadata, ECP address, user name, password, 2 ARNs | yes, user name and password |
 | 3. Certificate | A. Customer's certificate | CA, subject CN, certificate, private key, 3 ARNs | yes, private key |
 | | B. Platform Mesh PKI | 3 ARNs | no |
 
@@ -728,9 +854,13 @@ For every method the customer also enters the KMS key ARN and region.
 | 3. Certificate | A. Customer's certificate | the client certificate |
 | | B. Platform Mesh PKI | the trust anchor, before the CA expires |
 
+A changed Secret reaches Krypton through the controller (see Secret changes). In variant B cert-manager renews the
+client certificate itself.
+
 ## Registration, validation and activation (the same for every method)
 
-This starts when the AWSRootKey is complete: every field the method needs is set.
+This starts when the AWSRootKey is complete: every field the method needs is set. For the Platform Mesh PKI the
+certificate must also be issued.
 
 1. The controller calls Krypton to register the root key with the method and its values (working name, the API is
    designed by the Krypton team). What it sends is described in each section under "What the controller sends".
@@ -747,3 +877,6 @@ This starts when the AWSRootKey is complete: every field the method needs is set
    only after a passed check. If the check failed, the controller does not activate the key and writes the reason
    into the AWSRootKey status.
 8. The controller sets the AWSRootKey status to Ready and the key to Active, and the UI shows it.
+
+From registration on, when a Secret of the AWSRootKey changes, the controller sends the new values to Krypton (see
+Common rules, Secret changes).

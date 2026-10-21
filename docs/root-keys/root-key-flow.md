@@ -7,6 +7,8 @@ names marked "working name" are placeholders, the API is designed by the Krypton
 The authentication methods and their fields are listed per provider:
 
 - [AWS KMS](aws.md)
+- [GCP Cloud KMS](gcp.md)
+- [Azure Key Vault](azure.md)
 
 The small diagrams at the end show how Krypton authenticates to AWS with each method. They are behind Krypton, so
 they are examples only and not part of the contract.
@@ -24,8 +26,8 @@ sequenceDiagram
 
   rect rgba(52, 168, 83, 0.14)
     Note over U,KR: PHASE 1. Create the root key
-    U->>UI: picks the provider and method, enters the KMS key ARN, region and other template values
-    UI->>K: creates a draft root key (tenant, method, key ARN, region, other template values)
+    U->>UI: picks the provider and method, enters the key reference and other template values
+    UI->>K: creates a draft root key (tenant, method, key reference, other template values)
     K->>C: the controller sees the draft
 
     opt only if the method needs setup data (every AWS method does)
@@ -34,14 +36,21 @@ sequenceDiagram
       C->>K: writes it into the root key status
     end
 
+    opt only for the Platform Mesh PKI (Platform Mesh generates the certificate, the customer gives none)
+      Note over C: creates a cert-manager Certificate in its own cluster.<br/>cert-manager issues it into a Secret there
+    end
+
     K-->>UI: root key status with the setup data
     UI-->>U: setup template for the provider, already filled in
     Note over U: sets up the provider side with the template and reads what it returns
     U->>UI: enters what the method needs (ARNs, or credentials)
-    UI->>K: completes the root key
+    opt only if the method has a credential from the customer
+      UI->>K: first creates the Secret with the credentials, labelled with the root key UID
+    end
+    UI->>K: completes the root key (ARNs and the reference to the Secret)
     K->>C: the controller sees the complete root key
 
-    opt only if the method has a secret from the customer (hand-off to Krypton not agreed yet)
+    opt only if the method sends a secret to Krypton (hand-off not agreed yet)
       Note over C,KR: Target: nothing unencrypted is stored at Krypton or travels to it
       Note over C,KR: Plan: a Krypton public key. No such API exists yet, the calls below are placeholders
       C->>KR: gRPC get the public encryption key (working name)
@@ -66,6 +75,11 @@ sequenceDiagram
       C->>K: sets the root key status to failed, with the reason
     end
     K-->>UI: root key status
+
+    opt the Secret changes later (the customer replaces a value, or cert-manager renews the certificate)
+      Note over C: sees the changed Secret
+      C->>KR: gRPC new credentials for this root key (working name)
+    end
   end
 
   rect rgba(66, 133, 244, 0.14)
@@ -97,13 +111,17 @@ methods are described in [aws.md](aws.md).
 | 1. Static secret | A. Access key | encryption context | access key ID, secret, role ARN |
 | 2. Identity provider | A. Customer's IdP | encryption context | role ARN, token endpoint, client secret |
 | | B. Kubernetes service account | cluster issuer, audience, subject, encryption context | role ARN |
-| | C. Customer's SAML identity provider (after OIDC) | encryption context | 2 ARNs, password |
+| | C. Customer's SAML identity provider (after OIDC) | encryption context | 2 ARNs, user name, password |
 | 3. Certificate | A. Customer's certificate | encryption context | 3 ARNs, certificate, private key |
 | | B. Platform Mesh PKI | CA certificate, subject CN, encryption context, not-after | 3 ARNs |
 
-The methods with a secret from the customer (static secret, identity provider A and C, certificate A) use the
-second `opt` block of the generic flow. How the secret reaches Krypton is not agreed yet; the secret stays in a
-Kubernetes Secret in the customer's workspace and the AWSRootKey only references it.
+The methods that send a secret to Krypton (static secret, identity provider A and C, certificates A and B) use the
+hand-off `opt` block of the generic flow. How the secret reaches Krypton is not agreed yet.
+
+For all of them except the Platform Mesh PKI, the credentials stay in a Kubernetes Secret in the customer's
+workspace. The UI creates it before it completes the root key, and the AWSRootKey only references it. For the
+Platform Mesh PKI, cert-manager creates the Secret in the controller's cluster, and the controller shows the
+reference in the status.
 
 ## How Krypton authenticates to AWS, per method (examples)
 
@@ -214,12 +232,10 @@ sequenceDiagram
 sequenceDiagram
   autonumber
   participant KR as Krypton
-  participant CA as Tenant CA in the Platform Mesh PKI
   participant RA as AWS Roles Anywhere and STS
   participant KMS as Customer KMS
 
-  KR->>CA: short-lived certificate for this tenant
-  CA-->>KR: certificate
+  Note over KR: uses the certificate and key from the controller.<br/>cert-manager issued them
   KR->>RA: CreateSession signed with the certificate key, with the certificate and the three ARNs
   Note over RA: checks the signature and the certificate against the trust anchor.<br/>Checks the profile and the role
   RA-->>KR: temporary credentials
