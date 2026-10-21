@@ -80,21 +80,61 @@ func set(values ...string) []string {
 	return args
 }
 
-// releaseNotes renders the release notes (templates/NOTES.txt) of the chart with the arguments.
+// releaseNotes renders templates/NOTES.txt of the chart with the arguments, without a cluster.
+// `helm install --dry-run=client` needs a reachable cluster with Helm 3, and `helm template`
+// does not render the notes, so the test renders a copy of the chart in which NOTES.txt is a
+// named template that a test-only ConfigMap writes out. The notes get the same values and
+// helpers as in an install.
 func releaseNotes(t *testing.T, chart string, args ...string) string {
 	t.Helper()
 
-	out, err := runHelm(t, append([]string{"install", releaseName, chart, "--dry-run=client"}, args...)...)
+	chartCopy := filepath.Join(t.TempDir(), filepath.Base(chart))
+
+	err := os.CopyFS(chartCopy, os.DirFS(chart))
 	if err != nil {
-		t.Fatalf("helm install --dry-run failed: %v", err)
+		t.Fatal(err)
 	}
 
-	_, notes, found := strings.Cut(out, "NOTES:\n")
-	if !found {
-		t.Fatalf("no release notes in:\n%s", out)
+	templates := filepath.Join(chartCopy, "templates")
+
+	notes, err := os.ReadFile(filepath.Join(templates, "NOTES.txt"))
+	if err == nil {
+		err = os.Remove(filepath.Join(templates, "NOTES.txt"))
 	}
 
-	return notes
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, content := range map[string]string{
+		"_notes_under_test.tpl": "{{- define \"notesUnderTest\" -}}\n" + string(notes) + "\n{{- end -}}\n",
+		"notes-under-test.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notes-under-test\n" +
+			"data:\n  notes: {{ include \"notesUnderTest\" . | toJson }}\n",
+	} {
+		err = os.WriteFile(filepath.Join(templates, name), []byte(content), 0o600)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, err := runHelm(t, append([]string{"template", releaseName, chartCopy,
+		"--show-only", "templates/notes-under-test.yaml"}, args...)...)
+	if err != nil {
+		t.Fatalf("rendering the release notes failed: %v", err)
+	}
+
+	var cm struct {
+		Data struct {
+			Notes string `yaml:"notes"`
+		} `yaml:"data"`
+	}
+
+	err = yaml.Unmarshal([]byte(out), &cm)
+	if err != nil || cm.Data.Notes == "" {
+		t.Fatalf("no release notes in the output (%v):\n%s", err, out)
+	}
+
+	return cm.Data.Notes
 }
 
 // warnings returns the warnings of the release notes, one per line.
