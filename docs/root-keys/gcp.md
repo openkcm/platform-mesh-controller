@@ -10,7 +10,6 @@ the method requires from Platform Mesh. The flow that is the same for every prov
 |---|---|---|
 | [1. Static secret](#1-static-secret) | Service account key | [A. Service account key](#a-service-account-key) |
 | [2. Identity provider](#2-identity-provider) | OIDC | [A. Customer's IdP](#a-customers-identity-provider-oidc) |
-| | | [B. Kubernetes service account](#b-kubernetes-service-account) |
 | [3. Certificate](#3-certificate) | X.509 | [A. Customer's certificate](#a-customers-certificate) |
 | | | [B. Platform Mesh PKI](#b-platform-mesh-pki) |
 
@@ -20,8 +19,8 @@ customer's project by a Terraform file the customer applies. Krypton only calls 
 Every method is documented here, but not every method is implemented on day one: the implementation takes them one
 by one by priority.
 
-The parts called "How Krypton authenticates" show what happens behind Krypton. They explain each method and are
-examples only: that part is designed by the Krypton team.
+The part called "How Krypton authenticates" shows what happens behind Krypton. It explains the method and is an
+example only.
 
 ## Common rules
 
@@ -30,33 +29,55 @@ examples only: that part is designed by the Krypton team.
   `projects/<project>/locations/<location>/keyRings/<ring>/cryptoKeys/<key>`, without a key version. The location
   is part of the name, so the GCPRootKey has no `region` field.
 - **Secrets:** all credentials of a method go into one Kubernetes Secret: the secret value and the identifiers that
-  belong to it (the service account key file, client ID, certificates). The UI creates it in the
-  customer's kcp workspace and labels it with the GCPRootKey's UID. The GCPRootKey only references it (`secretRef`
-  with `name` and `namespace`). No secret value is ever written into a GCPRootKey, its status, a log or an event.
-  The entry names are fixed per method and listed in each section.
+  belong to it (the service account key file, client ID, certificates). The UI creates it in the customer's kcp
+  workspace, in the namespace of the GCPRootKey, after the draft exists, and names it `gcprootkey-<UID>` (see the next
+  rule). It labels it with `openkcm.io/root-key-credentials: "true"`. The GCPRootKey only references it (`secretRef`
+  with `name` and `namespace`), which the UI sets when it completes the key. For the Platform Mesh PKI cert-manager
+  creates the Secret in the controller's cluster instead, under the same name (see 3. B), and the controller writes the
+  reference. No secret value is ever written into a GCPRootKey, its status, a log or an event. The entry names are
+  fixed per method and listed in each section.
+- **Secret name and link:** every method names the Secret `gcprootkey-<UID>`, where UID is the `metadata.uid` of the
+  GCPRootKey. The API server assigns it when the draft is created, so the UI reads it from the draft before it creates
+  the Secret. The UID is unique across all workspaces, so the name alone identifies the root key. The controller
+  accepts only that name (in the GCPRootKey's own namespace, or in the platform's namespace for the Platform Mesh
+  PKI); if `secretRef` says anything else, it reads no Secret and shows the reason in the status. So a Secret belongs
+  to exactly one GCPRootKey: two root keys never share one, a customer cannot point a root key at another Secret, and
+  a root key that is deleted and created again gets a new UID and so a new Secret. A rotation replaces the values in
+  the same Secret.
+- **Deleting the root key (open):** a Secret named after the UID has no use once the GCPRootKey is gone. For the
+  Platform Mesh PKI a finalizer deletes the Secret. For a Secret the UI created in the customer's workspace, it is not
+  decided who deletes it: the controller with a finalizer (it then needs the right to delete Secrets there) or the UI.
 - **Secret hand-off to Krypton (open):** the target is that nothing unencrypted is stored at Krypton or travels to it,
   planned through a public key taken from Krypton, which does not exist yet. For now the value stays in the
   Kubernetes Secret as is, and how it reaches Krypton is open.
 - **Secret changes:** the controller watches the labelled Secrets. When one changes (the customer replaces a value,
-  or cert-manager renews a certificate), it tells Krypton that the root key has new credentials (working name, the
-  API is designed by the Krypton team).
-- **CRD change:** the `auth` block and `status.setupData` are new in the GCPRootKey CRD, so that one kind holds
-  several methods. Today the CRD is a stub with no reconciler: `spec` has `tenantNameRef`, an optional `keyUri`
-  and `lifecycle`.
-- **About the examples:** names are illustrative. Fields under `auth` and `status.setupData` are new;
+  or cert-manager renews a certificate), it finds the root key from the UID in the Secret name and tells Krypton that
+  the root key has new credentials (working name, the API is designed by the Krypton team).
+- **Provider path:** the full name of the Workload Identity provider: the record in the customer's project that tells
+  Google how to check the customer's IdP (2. A) or CA (3). It is a Google name, not a Terraform one: "provider" here
+  is not the Terraform provider plugin. The Terraform file creates the provider and prints its name, and the customer
+  copies it into the UI as is. The form is
+  `//iam.googleapis.com/projects/<project number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`.
+  The UI cannot build it itself: it needs the project number, and the key name has only the project ID [inferred].
+  Krypton sends it to Google's token service as the audience of the token exchange, so Google knows which provider
+  checks the token. It is not secret and is kept in the spec.
+- **CRD change:** the `auth` block is new in the GCPRootKey CRD, so that one kind holds several methods. The
+  Platform Mesh PKI variant also adds `status.clientCertificate`.
+  Today the CRD is a stub with no reconciler: `spec` has `tenantNameRef`, an optional `keyUri` and `lifecycle`.
+- **About the examples:** names are illustrative. Fields under `auth` and `status.clientCertificate` are new;
   `tenantNameRef` and `keyUri` exist in the CRD today. Secret values are written as placeholders.
 
 ## What is required from Platform Mesh
 
 | Building block | Needed by | Offered today |
 |---|---|---|
-| Secret in the customer's kcp workspace | key file, customer's IdP, customer's certificate | yes |
-| Controller may read and watch those Secrets (APIExport claim on `secrets`) | the same | no |
-| Hand-off of the credentials to Krypton, not in plain text | the same, and the Platform Mesh PKI | no |
-| Fixed public service-account issuer of the Krypton cluster | Kubernetes service account | not confirmed |
-| OpenBao PKI with a CA, and cert-manager with an issuer for it in the controller's cluster | Platform Mesh PKI | no |
+| Kubernetes Secret in the customer's kcp workspace | key file, customer's IdP, customer's certificate | yes |
+| Permission for the controller to read and watch those Secrets | key file, IdP, customer's certificate | no |
+| Hand-off of a Secret to Krypton, not in plain text | every method | no |
+| OpenBao PKI with a CA, and cert-manager with an issuer for it, in the controller's cluster | Platform Mesh PKI | no |
 
-The hand-off is described in Common rules.
+The permission is an APIExport permission claim on `secrets`; the APIExport claims none today. Whether the PKI has
+one CA per tenant or one shared CA is open.
 
 ## Step 0. Tenant creation (the same for every method)
 
@@ -92,11 +113,11 @@ customer's project). The service account can only encrypt and decrypt with one K
 | # | Value | Where it comes from | Secret | Goes into | Step |
 |---|---|---|---|---|---|
 | 1 | KMS key resource name | the customer's KMS key (console: copy resource name) | no | `spec.keyUri` | 1 |
-| 2 | Key file (`key.json`) | `gcloud iam service-accounts keys create` | yes | Secret entry `serviceAccountKey` | 6 |
+| 2 | Key file (`key.json`) | `gcloud iam service-accounts keys create` | yes | Secret `serviceAccountKey` | 6 |
 
 Not typed by the customer: `spec.tenantNameRef` and `spec.auth.method: ServiceAccountKey` (set by the UI with the
-draft), and `spec.auth.serviceAccountKey.secretRef` (set when the UI creates the Secret from value 2). The service
-account email is not entered: it is in the file as `client_email`.
+draft), and `spec.auth.serviceAccountKey.secretRef` (set when the UI creates the Secret `gcprootkey-<UID>` from value
+2). The service account email is not entered: it is in the file as `client_email`.
 
 **What the customer does:**
 1. In the UI, picks GCP KMS with a service account key and enters the KMS key resource name. No region is needed.
@@ -108,12 +129,12 @@ account email is not entered: it is in the file as `client_email`.
 4. Terraform returns the service account email as an output.
 5. Terraform does not create the private key, because a key created by Terraform is stored in the Terraform
    state. The customer creates it for the service account Terraform made. In Cloud Shell or a terminal:
-   `gcloud iam service-accounts keys create key.json --iam-account=<email>`. In the console: IAM & Admin,
-   Service Accounts, the account, Keys, Add key, Create new key, JSON, and `key.json` is downloaded.
+   `gcloud iam service-accounts keys create key.json --iam-account=<email>`. In the console: IAM & Admin >
+   Service Accounts > the account > Keys > Add key > Create new key > JSON, and `key.json` is downloaded.
    Google shows the key once: it cannot be downloaded again.
-6. The customer uploads `key.json` in the UI. That is the only thing entered after the key name. The UI first
-   creates the Secret with the file, then saves the `secretRef` to the GCPRootKey. That completes the key and starts
-   registration.
+6. The customer uploads `key.json` in the UI. That is the only thing entered after the key name. The UI first creates
+   the Secret `gcprootkey-<UID>` (the UID of the draft) with the file, then saves the `secretRef` to the GCPRootKey.
+   That completes the key and starts registration.
 
 **What is in `key.json`** (Krypton uses these five; the file has a few more that it ignores):
 - `type`: must be `service_account`. Other Google credential files (for example `authorized_user` or
@@ -156,6 +177,7 @@ kind: GCPRootKey
 metadata:
   name: acme-gcp-root
   namespace: default
+  uid: 9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
 spec:
   tenantNameRef: acme
   keyUri: projects/acme-prod/locations/europe-west3/keyRings/openkcm/cryptoKeys/l1-root
@@ -163,7 +185,7 @@ spec:
     method: ServiceAccountKey
     serviceAccountKey:
       secretRef:
-        name: acme-gcp-sa-key
+        name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
         namespace: default
 ```
 
@@ -173,7 +195,7 @@ The Secret the UI creates and the GCPRootKey points at:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: acme-gcp-sa-key
+  name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   namespace: default
 type: Opaque
 stringData:
@@ -207,8 +229,6 @@ signature against the public half of the key and returns an access token valid f
 only this one key. Nothing restricts the context of a call: GCP IAM cannot pin the additional authenticated
 data (the context string bound into the ciphertext) of an `Encrypt` or `Decrypt` call. So the separation is one
 service account per customer key, and nothing more.
-**Advantage:** the simplest method for the customer: one Terraform file and one key file. Platform Mesh needs only
-the Secret.
 **Downsides:**
 - The secret is long-lived. The key never expires on its own, it is stored as a Kubernetes Secret in the customer's
   workspace (and at Krypton), and it passes through the customer's machine when downloaded. Whoever gets the file
@@ -230,8 +250,7 @@ key alone does not revoke them. IAM changes take effect typically after 2 minute
 ## 2. Identity provider
 
 An identity provider (IdP) vouches for OpenKCM, and Google trusts that IdP. No Google secret is stored at OpenKCM.
-Google calls this Workload Identity Federation. OpenKCM provides no IdP of its own: in A the IdP is the
-customer's, in B it is the Kubernetes cluster where Krypton runs.
+Google calls this Workload Identity Federation. OpenKCM provides no IdP of its own: the IdP is the customer's.
 
 ### A. Customer's identity provider (OIDC)
 
@@ -263,76 +282,85 @@ Okta or Keycloak) and tells Google to trust tokens from that IdP. OpenKCM provid
 | # | Value | Where it comes from | Secret | Goes into | Step |
 |---|---|---|---|---|---|
 | 1 | KMS key resource name | the KMS key (console: copy resource name) | no | `spec.keyUri` | 2 |
-| 2 | Issuer URL | the IdP's discovery document | no | `spec.auth.wifCustomerIdP.issuerUrl` | 2 |
+| 2 | Issuer URL | the IdP's discovery document | no | the Terraform file only (kept in the UI form) | 2 |
 | 3 | Client ID | the OpenKCM application in the IdP | no | Secret entry `clientId` | 2 |
-| 4 | Token audience | the `aud` claim of the application's tokens | no | `spec.auth.wifCustomerIdP.tokenAudience` | 2 |
-| 5 | Provider path | the Terraform output | no | `spec.auth.wifCustomerIdP.providerPath` | 5 |
+| 4 | Token audience | the `aud` claim of the application's tokens | no | the Terraform file only (UI form) | 2 |
+| 5 | Provider path | printed by `terraform apply` | no | `spec.auth.wifCustomerIdP.providerPath` | 5 |
 | 6 | Token endpoint | the IdP's discovery document | no | `spec.auth.wifCustomerIdP.tokenUrl` | 5 |
-| 7 | Scope | the IdP, if it needs one | no | `spec.auth.wifCustomerIdP.scope` | 5 |
+| 7 | Scope | the IdP, if it needs one (see "About the scope") | no | `spec.auth.wifCustomerIdP.scope` | 5 |
 | 8 | Client secret | the OpenKCM application in the IdP | yes | Secret entry `clientSecret` | 5 |
 
-The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFCustomerIdP` and
-`spec.auth.wifCustomerIdP.secretRef` (set when the UI creates the Secret from values 3 and 8). The client ID is not
-secret but sits in the Secret with the client secret, so the credentials are in one place and a rotation is one
-write. The Terraform file needs the client ID in step 2, so the customer enters it there and the UI keeps it in the
-form until it creates the Secret in step 5; the draft GCPRootKey does not hold it. The token endpoint is in the
-discovery document, so the UI can fill it from the issuer URL.
+The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFCustomerIdP` and `spec.auth.wifCustomerIdP.secretRef`
+(set when the UI creates the Secret `gcprootkey-<UID>` from values 3 and 8). The client ID is not secret but sits in the
+Secret with the client secret, so the credentials are in one place and a rotation is one write. The Terraform file needs
+the issuer URL, the client ID and the token audience in step 2, so the customer enters them there and the UI keeps them
+in the form: the client ID until it creates the Secret in step 5, the issuer URL and the token audience until the
+Terraform file is shown. The draft GCPRootKey holds none of them. The controller sends neither the issuer URL nor the
+token audience to Krypton: only Google's provider checks them. The token endpoint is in the discovery document, so the
+UI can fill it from the issuer URL.
+
+**About the scope:** the scope is a standard OAuth 2.0 parameter of the token request that Krypton sends to the
+customer's IdP. It tells the IdP what the token is for. It is the IdP's scope, not a Google one, and Google never sees
+it. The field exists because some IdPs refuse the request without one (Microsoft Entra ID needs the resource
+identifier with `/.default`, Okta needs a scope the customer created), while others apply a default, and then the
+customer leaves it empty. The customer takes the value from the IdP's documentation for the client credentials grant,
+and Krypton sends it as entered.
 
 **What the customer does:**
 1. In the IdP, registers the OpenKCM application and notes its client ID and secret, the issuer URL, the token
    endpoint, the scope if the IdP needs one, and the `aud` of a token the application gets.
 2. In the UI, picks GCP KMS with an IdP and enters what the Terraform file needs:
-   - **KMS key resource name:** the key the permissions are put on.
-   - **Issuer URL:** Google fetches the IdP's public keys from it to check the token's signature.
-   - **Client ID:** only tokens whose `sub` equals it are accepted. Krypton also logs in to the IdP with it.
-   - **Token audience:** only tokens whose `aud` equals it are accepted.
+    - **KMS key resource name:** the key the permissions are put on.
+    - **Issuer URL:** Google fetches the IdP's public keys from it to check the token's signature.
+    - **Client ID:** only tokens whose `sub` equals it are accepted. Krypton also logs in to the IdP with it.
+    - **Token audience:** only tokens whose `aud` equals it are accepted.
 
-   The UI creates a draft GCPRootKey with all of them except the client ID, and gives a Terraform file with these
-   values filled in.
+   The UI creates a draft GCPRootKey with the key resource name, and gives a Terraform file with these values
+   filled in.
 3. In Cloud Shell, or a terminal logged in to GCP, applies the file: `terraform init`, then `terraform apply`. It
    changes the pool project and the KMS key.
-4. Terraform returns one value:
-   - **Provider path:** the full name of the provider, with the project number (not the project ID). Terraform's own
-     output lacks the `//iam.googleapis.com/` prefix that Google expects, so the file adds it. Krypton sends it with
-     the token so Google knows which provider checks it.
+4. `terraform apply` prints one value, the **provider path** (see Common rules): the name of the provider it has just
+   created, with the project number (not the project ID). Terraform's own attribute lacks the `//iam.googleapis.com/`
+   prefix that Google expects, so the file adds it.
 5. In the UI, enters what Krypton needs to get tokens:
-   - **Provider path:** the value from step 4.
-   - **Token endpoint:** where Krypton asks the IdP for a token.
-   - **Scope:** sent in that token request, only if the IdP needs one. Terraform does not use it, so it is entered
-     here and not in step 2.
-   - **Client secret:** Krypton logs in to the IdP with it and the client ID.
+    - **Provider path:** the value printed in step 4, copied as is.
+    - **Token endpoint:** where Krypton asks the IdP for a token.
+    - **Scope:** sent in that token request, only if the IdP needs one. Terraform does not use it, so it is entered
+      here and not in step 2.
+    - **Client secret:** Krypton logs in to the IdP with it and the client ID.
 
-   The UI first creates the Secret with the client ID and the client secret, then saves the provider path, the token
-   endpoint, the scope and the `secretRef` to the GCPRootKey. That completes the key and starts registration.
+   The UI first creates the Secret `gcprootkey-<UID>` (the UID of the draft) with the client ID and the client secret,
+   then saves the provider path, the token endpoint, the scope and the `secretRef` to the GCPRootKey. That completes the
+   key and starts registration.
 
 **What the Terraform file creates.** Only settings, nothing secret:
 - **A pool:** a container for identities from outside Google. Empty on its own.
 - **A provider in the pool:** Google's record of the customer's IdP. It holds four values:
-  - **Issuer URI:** the issuer URL. Google fetches the IdP's public keys from it and checks the token's signature.
-  - **Allowed audience:** the token audience, for example `openkcm-gcp`. A token with a different `aud` is
-    refused. There is no fixed value: the customer sets it in the IdP and enters it in the UI.
-  - **Attribute mapping:** the token's `sub` becomes the application's name in the pool. The bindings use that name.
-  - **Attribute condition:** `sub` must equal the OpenKCM client ID, so tokens of other applications at the same
-    IdP are refused.
+    - **Issuer URI:** the issuer URL. Google fetches the IdP's public keys from it and checks the token's signature.
+    - **Allowed audience:** the token audience, for example `openkcm-gcp`. A token with a different `aud` is
+      refused. There is no fixed value: the customer sets it in the IdP and enters it in the UI.
+    - **Attribute mapping:** the token's `sub` becomes the application's name in the pool. The bindings use that name.
+    - **Attribute condition:** `sub` must equal the OpenKCM client ID, so tokens of other applications at the same
+      IdP are refused.
 - **Two bindings on the KMS key itself** (not the key ring or the project), both for the OpenKCM application's
   name in the pool: one to encrypt and decrypt with this key only, one to read the key's state.
 
 The file creates no service account and no secret, and does not enable APIs, change organisation policy, or create
 the KMS key or the IdP application.
 
-**One example.** The OpenKCM application has client ID `0oa1b2c3d4`. Its
-tokens carry `iss` = `https://login.acme.example/oauth2/default`, `sub` = `0oa1b2c3d4` and `aud` = `openkcm-gcp`.
+**Example:** the OpenKCM application has client ID `0oa1b2c3d4`. Its tokens carry
+`iss` = `https://login.acme.example/oauth2/default`, `sub` = `0oa1b2c3d4` and `aud` = `openkcm-gcp`.
 
 | Value | In the IdP | In the GCPRootKey | In Google (the provider) |
 |---|---|---|---|
-| Client ID `0oa1b2c3d4` | app registration; becomes `sub` | the Secret, entry `clientId` | condition: `sub` equals it |
-| Client secret | app registration | the Secret, entry `clientSecret` | not stored |
-| Issuer URL | the IdP's address | `issuerUrl` | issuer URI |
-| Token audience `openkcm-gcp` | audience setting; becomes `aud` of its tokens | `tokenAudience` | allowed audience |
+| Client ID `0oa1b2c3d4` | app registration; `sub` of its tokens | the Secret, `clientId` | condition: `sub` equals it |
+| Client secret | app registration | the Secret, `clientSecret` | not stored |
+| Issuer URL | the IdP's address | not kept (Terraform only) | issuer URI |
+| Token audience `openkcm-gcp` | audience setting; `aud` of its tokens | not kept (Terraform only) | allowed audience |
 
 Who uses or checks each value:
-- Client ID: Krypton logs in with it; Google checks `sub` against it.
-- Client secret: Krypton logs in with it.
+- Client ID: Krypton logs in to the IdP with it; Google checks `sub` against it.
+- Client secret: Krypton logs in to the IdP with it.
 - Issuer URL: Google fetches the IdP's keys from it and checks the signature.
 - Token audience: Google checks `aud` against it.
 
@@ -341,8 +369,9 @@ Google checks `iss`, `sub` and `aud`; the controller and Krypton check none of t
 
 **Where the values are kept:** the client ID and the client secret in a Kubernetes Secret in the customer's kcp
 workspace (entries `clientId` and `clientSecret`), created by the UI in step 5, which the GCPRootKey only
-references. Everything else is in the GCPRootKey spec. No secret value is ever written into the GCPRootKey, its
-status, a log or an event.
+references. The provider path, the token endpoint and the scope are in the GCPRootKey spec; the issuer URL and the
+token audience are not kept, because only the Terraform file needs them. No secret value is ever written into the
+GCPRootKey, its status, a log or an event.
 
 **Example:**
 
@@ -352,19 +381,18 @@ kind: GCPRootKey
 metadata:
   name: acme-gcp-root
   namespace: default
+  uid: 9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
 spec:
   tenantNameRef: acme
   keyUri: projects/acme-prod/locations/europe-west3/keyRings/openkcm/cryptoKeys/l1-root
   auth:
     method: WIFCustomerIdP
     wifCustomerIdP:
-      issuerUrl: https://login.acme.example/oauth2/default
-      tokenAudience: openkcm-gcp
-      providerPath: <provider path from Terraform>
+      providerPath: //iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/kms/providers/acme
       tokenUrl: https://login.acme.example/oauth2/default/v1/token
       scope: <scope, if the IdP needs one>
       secretRef:
-        name: acme-gcp-idp-secret
+        name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
         namespace: default
 ```
 
@@ -374,7 +402,7 @@ The Secret the UI creates and the GCPRootKey points at:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: acme-gcp-idp-secret
+  name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   namespace: default
 type: Opaque
 stringData:
@@ -398,8 +426,7 @@ token expires, and signs nothing itself.
 Only the OpenKCM application's tokens pass the provider, and only that application has permissions on the key. As
 with the service account key, Google cannot restrict the context of an `Encrypt` or `Decrypt` call, so the
 separation is one application and one provider per customer key.
-**Advantage:** no Google secret is stored at OpenKCM, and the customer controls access in their own IdP and can cut
-it off there.
+
 **Downsides:** the client secret is long-lived, stored at OpenKCM and rotated by hand. Access depends on the
 customer's IdP being up and reachable from the internet. IdPs differ: `sub` is not always the client ID, and some
 set `aud` only from the token request, so each IdP needs checking. KMS with a federated token and no service account in
@@ -410,123 +437,6 @@ the pool. Disabling the pool also blocks Google tokens already issued. Disabling
 stops only new ones: a token already issued lives until it expires. Removing the bindings is an IAM change that
 applies after IAM propagation (typically 2 minutes, potentially 7 or longer); Google does not say whether it also
 cuts tokens already issued.
-
-### B. Kubernetes service account
-
-**What it is:** the Kubernetes cluster where Krypton runs acts as the IdP. Kubernetes signs a short-lived token for
-Krypton's service account (a non-human identity inside the cluster), and the customer tells Google to trust tokens
-from that cluster. This variant only applies if Krypton runs in Kubernetes, and it is an option for whoever deploys
-it that way, not a rule.
-
-**How it works:**
-1. Kubernetes gives Krypton a signed token for its service account, meant for the customer's Google provider.
-2. Krypton sends that token to Google.
-3. Google checks it against a provider the customer set up in their project: signed by this cluster (Google reads
-   the cluster's public keys at its issuer address, or from a file the customer uploaded), meant for this provider,
-   issued to Krypton's service account.
-4. If it passes, Google returns a short-lived access token, and Krypton calls the KMS key with it.
-
-**Before anything:**
-- A GCP project with a symmetric Cloud KMS key (Cloud KMS API enabled), and a project for the workload identity
-  pool, with billing on. It can be the same project; Google recommends a separate one.
-- In the pool project, the same four APIs as in A: IAM, STS, Resource Manager and Service Account Credentials.
-- The rights to create a pool and a provider (Workload Identity Pool Admin or project Owner) and to change
-  permissions on the KMS key (Owner or Cloud KMS Admin). If the organisation limits which IdPs are allowed (not by
-  default), its policy administrator adds the cluster's issuer address from the setup data.
-
-**What the customer provides:**
-
-| # | Value | Where it comes from | Secret | Goes into | Step |
-|---|---|---|---|---|---|
-| 1 | KMS key resource name | the KMS key (console: copy resource name) | no | `spec.keyUri` | 1 |
-| 2 | Provider path | the Terraform output | no | `spec.auth.wifKubernetes.providerPath` | 5 |
-
-The UI sets the rest: `spec.tenantNameRef` and `spec.auth.method: WIFKubernetes`. There is no secret and no
-`secretRef`. The issuer address and the subject come from Krypton as setup data and go into the Terraform file.
-
-**What the customer does:**
-1. In the UI, picks GCP KMS with a Kubernetes service account and enters the KMS key resource name. The UI creates a
-   draft GCPRootKey.
-2. The controller asks Krypton for the setup data and writes it into the GCPRootKey status (`status.setupData`).
-   Repeating the call returns the same result. The setup data is:
-   - **Issuer address:** where Google fetches the cluster's public keys to check the token's signature.
-   - **Subject:** `system:serviceaccount:<namespace>:<name>` of Krypton's service account. Only this subject is
-     accepted.
-   - **Cluster keys:** only if the issuer address is not public. The cluster's public keys as a file, which the
-     provider holds instead of fetching them.
-3. The UI gives a Terraform file with the key name and the setup data filled in. The customer types nothing into it.
-4. In Cloud Shell, or a terminal logged in to GCP, applies the file: `terraform init`, then `terraform apply`. It
-   changes the pool project and the KMS key.
-5. Terraform returns the provider path.
-6. In the UI, enters the provider path. The GCPRootKey is complete.
-
-**What the Terraform file creates.** Only settings, nothing secret:
-- **A pool:** a container for identities from outside Google. Empty on its own.
-- **A provider in the pool:** Google's record of the cluster as an IdP. It holds four values:
-  - **Issuer URI:** the issuer address. Google fetches the cluster's public keys from it and checks the token's
-    signature.
-  - **Allowed audience:** left at its default, the provider's own address. It is different for every customer, so a
-    token meant for another customer's provider is refused.
-  - **Attribute mapping:** the token's `sub` becomes Krypton's name in the pool. The bindings use that name.
-  - **Attribute condition:** `sub` must equal Krypton's subject.
-
-  If the setup data has the cluster keys, the provider also holds them (at most 8).
-- **Two bindings on the KMS key itself** (not the key ring or the project), both for Krypton's name in the pool: one
-  to encrypt and decrypt with this key only, one to read the key's state.
-
-Terraform returns one value, the provider path: the full name of the provider, with the project number (not the
-project ID). Terraform's own output lacks the `//iam.googleapis.com/` prefix that Google expects, so the file adds
-it. The file does not enable APIs or create the KMS key.
-
-**Where the values are kept:** nothing secret. The setup data is in the GCPRootKey status; the key name and the
-provider path are in the spec.
-
-**Example:**
-
-```yaml
-apiVersion: operations.openkcm.io/v1alpha1
-kind: GCPRootKey
-metadata:
-  name: acme-gcp-root
-  namespace: default
-spec:
-  tenantNameRef: acme
-  keyUri: projects/acme-prod/locations/europe-west3/keyRings/openkcm/cryptoKeys/l1-root
-  auth:
-    method: WIFKubernetes
-    wifKubernetes:
-      providerPath: <provider path from Terraform>
-status:
-  setupData:
-    issuerUrl: https://oidc.krypton-cluster.example.com
-    subject: system:serviceaccount:krypton:krypton
-```
-
-**What the controller sends:** the method, the tenant ID, the key resource name and the provider path. Registration,
-validation and activation then follow (see the last section).
-
-**Required from Platform Mesh:** the cluster where Krypton runs publishes its service-account issuer at a public
-address that does not change (on Gardener, the managed issuer serves a cluster's discovery documents from the
-Gardener Discovery Server; once enabled it cannot be disabled), and Krypton returns the issuer address and the
-subject as setup data (and the cluster keys, if the address is not public). No secret.
-
-**How Krypton authenticates (example):** it gets a token for its service account from Kubernetes, meant for the
-customer's provider, then follows steps 1 to 4 of "How it works". Kubernetes renews the token, and Krypton repeats
-the steps when the Google token expires.
-
-**Tenant isolation:** the subject is Krypton's service account, the same for every customer, so it does not separate
-customers. The pool does: each customer has their own pool and provider, a token meant for one provider is refused by
-the others, and the key's bindings name only that customer's pool. As with the other methods, Google cannot restrict
-the context of an `Encrypt` or `Decrypt` call.
-**Advantage:** no secret at all and nothing for the customer to renew: Kubernetes issues and rotates the short-lived
-token. The customer enters only the provider path.
-**Downside:** every customer trusts the issuer of the cluster where Krypton runs. If Krypton moves to another cluster
-or the issuer address changes, every customer must update their provider, otherwise Krypton loses access to the key.
-Google must reach the issuer address. If the address is not public, the customer uploads the cluster keys instead,
-and each rotation of the cluster's signing keys then needs a new upload. As in A, Google lists Cloud KMS as GA for
-federated identities with no known limitations.
-**Cut-off:** the customer removes the bindings, or disables the provider or the pool. The effects are the same as in
-A.
 
 ## 3. Certificate
 
@@ -551,18 +461,18 @@ one certificate authority (CA). No Google secret is stored at OpenKCM. The two v
 **What the Terraform file creates (both variants).** Only settings, nothing secret:
 - **A pool:** a container for identities from outside Google. Empty on its own.
 - **A provider in the pool**, of the certificate type. It holds three values:
-  - **Trust store:** the CA certificate. Google accepts only client certificates issued by it. It holds up to three
-    trust anchors, so an old and a new CA can overlap.
-  - **Attribute mapping:** the certificate's common name (CN) becomes Krypton's name in the pool. The bindings use
-    that name.
-  - **Attribute condition:** the CN must equal the expected name, so a certificate from the same CA with any other
-    name is refused.
+    - **Trust store:** the CA certificate. Google accepts only client certificates issued by it. It holds up to three
+      trust anchors, so an old and a new CA can overlap.
+    - **Attribute mapping:** the certificate's common name (CN) becomes Krypton's name in the pool. The bindings use
+      that name.
+    - **Attribute condition:** the CN must equal the expected name, so a certificate from the same CA with any other
+      name is refused.
 - **Two bindings on the KMS key itself** (not the key ring or the project), both for that name in the pool: one to
   encrypt and decrypt with this key only, one to read the key's state.
 
-Terraform returns one value, the provider path: the full name of the provider, with the project number (not the
-project ID). Terraform's own output lacks the `//iam.googleapis.com/` prefix that Google expects, so the file adds
-it. The file does not enable APIs or create the KMS key.
+`terraform apply` prints one value, the provider path (see Common rules): the name of the provider it has just
+created, with the project number (not the project ID). Terraform's own attribute lacks the `//iam.googleapis.com/`
+prefix that Google expects, so the file adds it. The file does not enable APIs or create the KMS key.
 
 **Downsides (both variants):** Google documents no revocation check (CRL or OCSP) for these certificates, so none
 should be assumed. To stop one certificate, the customer changes the trust store, the condition or the bindings, so
@@ -585,46 +495,49 @@ should be the root of the chain: Google does not say whether an intermediate can
 | # | Value | Where it comes from | Secret | Goes into | Step |
 |---|---|---|---|---|---|
 | 1 | KMS key resource name | the KMS key (console: copy resource name) | no | `spec.keyUri` | 2 |
-| 2 | CA certificate (PEM) | the customer's PKI | no | Secret entry `ca.crt` | 2 |
-| 3 | Subject CN of the client certificate | the customer's PKI | no | `spec.auth.wifX509.subjectCn` | 2 |
-| 4 | Provider path | the Terraform output | no | `spec.auth.wifX509.providerPath` | 5 |
+| 2 | CA certificate (PEM) | the customer's PKI | no | Secret entry `ca.crt`, and the Terraform file | 2 |
+| 3 | Subject CN of the client certificate | the customer's PKI | no | the Terraform file only (UI form) | 2 |
+| 4 | Provider path | printed by `terraform apply` | no | `spec.auth.wifX509.providerPath` | 5 |
 | 5 | Client certificate (PEM) | the customer's PKI | no | Secret entry `tls.crt` | 5 |
 | 6 | Client private key (PEM) | the customer's PKI | yes | Secret entry `tls.key` | 5 |
 
-The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFX509`,
-`spec.auth.wifX509.certificateSource: Customer` and `spec.auth.wifX509.secretRef` (set when the UI creates the
-Secret from values 2, 5 and 6). The three certificate values sit in one Secret of type `kubernetes.io/tls`, the
-standard Kubernetes format for a certificate with its key; the CA certificate is its `ca.crt` entry. Only the key is
-secret. The Terraform file needs the CA certificate in step 2, so the customer gives it there and the UI keeps it in
-the form until it creates the Secret in step 5; the draft GCPRootKey does not hold it. If the client certificate is
-issued by an intermediate CA, value 5 (`tls.crt`) holds the client certificate first, then the intermediate
+The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFX509`, `spec.auth.wifX509.certificateSource: Customer`
+and `spec.auth.wifX509.secretRef` (set when the UI creates the Secret `gcprootkey-<UID>` from values 2, 5 and 6). The
+three certificate values sit in one Secret of type `kubernetes.io/tls`, the standard Kubernetes format for a certificate
+with its key; the CA certificate is its `ca.crt` entry. Only the key is secret. The Terraform file needs the CA
+certificate and the subject CN in step 2, so the customer gives them there and the UI keeps them in the form: the CA
+certificate until it creates the Secret in step 5, the subject CN until the Terraform file is shown. The draft
+GCPRootKey holds neither. The subject CN is not kept: it is already in the client certificate. If the client certificate
+is issued by an intermediate CA, value 5 (`tls.crt`) holds the client certificate first, then the intermediate
 certificates.
 
 **What the customer does:**
 1. In their PKI, issues a client certificate for OpenKCM, valid at most 390 days, and keeps the CA certificate,
    the client certificate and its private key.
 2. In the UI, picks GCP KMS with a certificate (own CA) and enters what the Terraform file needs:
-   - **KMS key resource name:** the key the permissions are put on.
-   - **CA certificate:** Google accepts only client certificates issued by this CA.
-   - **Subject CN:** only a certificate with this name is accepted.
+    - **KMS key resource name:** the key the permissions are put on.
+    - **CA certificate:** Google accepts only client certificates issued by this CA.
+    - **Subject CN:** only a certificate with this name is accepted.
 
-   The UI creates a draft GCPRootKey with all of them except the CA certificate, and gives a Terraform file with
-   these values filled in.
+   The UI creates a draft GCPRootKey with the key resource name, and gives a Terraform file with these values
+   filled in.
 3. In Cloud Shell, or a terminal logged in to GCP, applies the file: `terraform init`, then `terraform apply`. It
    changes the pool project and the KMS key.
 4. Terraform returns the provider path.
 5. In the UI, enters what Krypton needs:
-   - **Provider path:** the value from step 4.
-   - **Client certificate:** Krypton presents it to Google.
-   - **Client private key:** Krypton proves with it that the certificate is its own. It is never sent to Google.
+    - **Provider path:** the value from step 4.
+    - **Client certificate:** Krypton presents it to Google.
+    - **Client private key:** Krypton proves with it that the certificate is its own. It is never sent to Google.
 
-   The UI first creates the Secret with the client certificate, the private key and the CA certificate, then saves
-   the provider path and the `secretRef` to the GCPRootKey. That completes the key and starts registration.
+   The UI first creates the Secret `gcprootkey-<UID>` (the UID of the draft) with the client certificate, the private
+   key and the CA certificate, then saves the provider path and the `secretRef` to the GCPRootKey. That completes the
+   key and starts registration.
 
-**Where the values are kept:** the client certificate, the client private key and the CA certificate in one Kubernetes
-Secret of type `kubernetes.io/tls` in the customer's kcp workspace (entries `tls.crt`, `tls.key` and `ca.crt`),
-created by the UI in step 5, which the GCPRootKey only references. The subject CN and the provider path are public
-and kept in the GCPRootKey spec. No secret value is ever written into the GCPRootKey, its status, a log or an event.
+**Where the values are kept:** the client certificate, the client private key and the CA certificate in one
+Kubernetes Secret of type `kubernetes.io/tls` in the customer's kcp workspace (entries `tls.crt`, `tls.key` and
+`ca.crt`), created by the UI in step 5, which the GCPRootKey only references. The provider path is public and kept in
+the GCPRootKey spec. The subject CN is not kept: the UI uses it only to fill the Terraform file, and it is also in
+the client certificate. No secret value is ever written into the GCPRootKey, its status, a log or an event.
 
 **Example:**
 
@@ -634,6 +547,7 @@ kind: GCPRootKey
 metadata:
   name: acme-gcp-root
   namespace: default
+  uid: 9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
 spec:
   tenantNameRef: acme
   keyUri: projects/acme-prod/locations/europe-west3/keyRings/openkcm/cryptoKeys/l1-root
@@ -641,10 +555,9 @@ spec:
     method: WIFX509
     wifX509:
       certificateSource: Customer
-      subjectCn: openkcm-acme
-      providerPath: <provider path from Terraform>
+      providerPath: //iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/kms/providers/acme
       secretRef:
-        name: acme-gcp-client-cert-key
+        name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
         namespace: default
 ```
 
@@ -654,7 +567,7 @@ The Secret the UI creates and the GCPRootKey points at:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: acme-gcp-client-cert-key
+  name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   namespace: default
 type: kubernetes.io/tls
 stringData:
@@ -665,8 +578,7 @@ stringData:
 
 **What the controller sends:** the method, the tenant ID, the key resource name, the provider path, the client
 certificate and the client private key (how the key reaches Krypton is open, see Common rules). The CA certificate
-(which stays in the Secret) and the subject CN are only for the Terraform file. Registration, validation and
-activation then follow (see the last section).
+stays in the Secret. Registration, validation and activation then follow (see the last section).
 
 **Required from Platform Mesh:** a Kubernetes Secret for the client certificate, the private key and the CA
 certificate, and a way to hand the key to Krypton without plain text (open). The plan is a public key taken from
@@ -695,40 +607,44 @@ certificate: Platform Mesh generates it. The controller creates a cert-manager `
 Platform Mesh PKI, and cert-manager writes the short-lived certificate and its key into a Secret of type
 `kubernetes.io/tls`, renewing it before it expires. The `Certificate` and the Secret live in the cluster where the
 controller runs (a normal Kubernetes cluster, where cert-manager can run; a kcp workspace has no workloads), in a
-namespace owned by the platform. The customer never sees or touches them. The GCPRootKey does not point at the
-Secret: the controller derives its location from the GCPRootKey and shows it in the status. Krypton cannot fetch a
+namespace owned by the platform. The customer never sees or touches them. The GCPRootKey points at the Secret with
+`secretRef` in the spec, as in 3. A, but the controller writes it, not the UI: the customer gives no secret, so the
+UI creates no Secret. The name is the same as in every other method, derived from the UID of the GCPRootKey
+(`gcprootkey-<UID>`), which the API server assigns when the draft is created and which is unique across all
+workspaces. The controller creates the `Certificate`
+and the Secret under that name and, when the Secret exists, writes the reference into the spec. The customer can edit
+the spec, so on every reconcile the controller accepts only the expected name and namespace; if the field says
+anything else, it reads no Secret and shows the reason in the status. This way the controller can watch the Secret
+and follow every renewal. Krypton cannot fetch a
 certificate from Platform Mesh itself, so the controller reads the Secret and sends the certificate to Krypton. The
 customer gets the CA's public certificate from the GCPRootKey status, and the Terraform file puts it into Google.
-
-The placement of the `Certificate` and the Secret, and the missing `secretRef`, are required for this method and
-are to be confirmed with the Platform Mesh team (see the end of this section).
 
 **What the customer provides:**
 
 | # | Value | Where it comes from | Secret | Goes into | Step |
 |---|---|---|---|---|---|
 | 1 | KMS key resource name | the KMS key (console: copy resource name) | no | `spec.keyUri` | 1 |
-| 2 | Provider path | the Terraform output | no | `spec.auth.wifX509.providerPath` | 7 |
+| 2 | Provider path | printed by `terraform apply` | no | `spec.auth.wifX509.providerPath` | 7 |
 
-The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFX509` and
-`spec.auth.wifX509.certificateSource: PlatformMesh`. The customer gives no secret, and there is no `secretRef` in the
-spec: the controller derives where the Secret is and shows it in the status (field name to be agreed), so the
-customer cannot point the controller at another Secret.
+The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFX509`,
+`spec.auth.wifX509.certificateSource: PlatformMesh`. The controller sets `spec.auth.wifX509.secretRef` (the name and
+namespace of the Secret that cert-manager creates in the controller's cluster) once the Secret exists. The customer
+gives no secret and does not choose this reference.
 
 **What the customer does:**
 1. In the UI, picks GCP KMS with a certificate (Platform Mesh PKI) and enters the KMS key resource name. The UI
    creates a draft GCPRootKey.
-2. The controller creates the cert-manager `Certificate` for this root key (see the example below). While the
-   certificate is not issued, the status shows a condition (for example `CertificateReady: False`) with the reason,
-   such as the Platform Mesh PKI being unreachable.
-3. The controller writes the setup data into the GCPRootKey status (`status.setupData`). The setup data is:
-   - **CA certificate:** the CA. Google will accept only certificates issued by it.
-   - **Subject CN:** the name on Krypton's certificates for this tenant. Only it is accepted.
-   - **Not-after date:** when the CA expires. The customer must put the new CA into the provider before then.
+2. The controller creates the cert-manager `Certificate` for this root key (see the example below). When cert-manager
+   has created the Secret, the controller writes `spec.auth.wifX509.secretRef` (a patch that touches only this field)
+   and sets `CertificateReady: True`. While the certificate is not issued, the status shows a condition (for example
+   `CertificateReady: False`) with the reason, such as the Platform Mesh PKI being unreachable.
+3. The controller writes the CA data into the GCPRootKey status (`status.clientCertificate`). It has two values:
+    - **CA certificate:** the CA. Google will accept only certificates issued by it.
+    - **Subject CN:** the name on Krypton's certificates for this tenant. Only it is accepted.
 
-   Where these three come from (Krypton or the generated Secret) is open, see below. Krypton has no other setup data
-   for this method, so if they come from the Secret, the method needs nothing from Krypton at this point.
-4. The UI gives a Terraform file with the key name and the setup data filled in. The customer types nothing into it.
+   The CA certificate comes from the generated Secret (`ca.crt`), and the subject CN from the `Certificate`. This
+   method needs nothing from Krypton at this point.
+4. The UI gives a Terraform file with the key name and the CA data filled in. The customer types nothing into it.
 5. In Cloud Shell, or a terminal logged in to GCP, applies the file: `terraform init`, then `terraform apply`. It
    changes the pool project and the KMS key.
 6. Terraform returns the provider path.
@@ -736,8 +652,8 @@ customer cannot point the controller at another Secret.
    registers the root key (see the last section).
 
 **Where the values are kept:** the customer provides nothing secret. The certificate and key are in the Secret that
-cert-manager creates in the controller's cluster; the setup data and the Secret reference are in the GCPRootKey
-status; the key name and the provider path are in the spec.
+cert-manager creates in the controller's cluster; the CA data is in the GCPRootKey status; the key name, the
+provider path and the Secret reference are in the spec.
 
 **Example:**
 
@@ -747,6 +663,7 @@ kind: GCPRootKey
 metadata:
   name: acme-gcp-root
   namespace: default
+  uid: 9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
 spec:
   tenantNameRef: acme
   keyUri: projects/acme-prod/locations/europe-west3/keyRings/openkcm/cryptoKeys/l1-root
@@ -754,22 +671,20 @@ spec:
     method: WIFX509
     wifX509:
       certificateSource: PlatformMesh
-      providerPath: <provider path from Terraform>
+      providerPath: //iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/kms/providers/acme
+      secretRef:
+        name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
+        namespace: openkcm-platform
 status:
   conditions:
   - type: CertificateReady
     status: "True"
   clientCertificate:
-    secretRef:
-      name: gcprootkey-9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
-      namespace: openkcm-platform
-  setupData:
     caCertificatePem: |
       -----BEGIN CERTIFICATE-----
       MIIB...
       -----END CERTIFICATE-----
     subjectCn: openkcm-3f2a9c1e
-    notAfter: "2027-10-14T00:00:00Z"
 ```
 
 The `Certificate` the controller creates for this root key, in the cluster where it runs:
@@ -778,10 +693,10 @@ The `Certificate` the controller creates for this root key, in the cluster where
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: gcprootkey-9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+  name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   namespace: openkcm-platform
 spec:
-  secretName: gcprootkey-9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+  secretName: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   commonName: openkcm-3f2a9c1e
   usages:
   - digital signature
@@ -794,18 +709,20 @@ spec:
     name: tenant-3f2a9c1e
   secretTemplate:
     labels:
-      openkcm.io/gcprootkey-uid: 9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+      openkcm.io/root-key-credentials: "true"
 ```
 
-- The names derive from the GCPRootKey's UID, not its name: two workspaces can both have an `acme-gcp-root`.
+- The names derive from the UID of the GCPRootKey (`metadata.uid`), which the API server assigns: two workspaces can
+  both have an `acme-gcp-root`, but never the same UID.
 - `commonName` is the subject CN that the provider's attribute condition checks. The customer does not choose it.
 - `usages` lists the key usages of a TLS client certificate, and cert-manager's list replaces its defaults.
 - `duration` is far below the 390 days that Google accepts.
-- `secretTemplate` puts the label on the Secret. The controller watches Secrets by this label, not every Secret.
-- The issuer is one per tenant if the CA is per tenant (open, see below).
+- `secretTemplate` puts the label on the Secret. The controller watches Secrets by this label, not every Secret. It maps
+  a changed Secret to its root key through the UID in the Secret name, so the label carries no root key identity.
+- The issuer is one per tenant if the CA is per tenant.
 - Names, namespace, label key and lifetimes are illustrative; the platform chooses them.
-- `ca.crt` in the Secret and `caCertificatePem` in `status.setupData` are the same CA certificate. The status copy
-  lets the UI fill the Terraform file without reading the Secret that holds the private key.
+- `ca.crt` in the Secret and `caCertificatePem` in `status.clientCertificate` are the same CA certificate. The status
+  copy lets the UI fill the Terraform file without reading the Secret that holds the private key.
 - When the GCPRootKey is deleted, a finalizer on it deletes the `Certificate` and the Secret first. An
   ownerReference cannot span the kcp workspace and the controller's cluster.
 
@@ -815,10 +732,10 @@ The Secret cert-manager creates from it:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: gcprootkey-9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+  name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   namespace: openkcm-platform
   labels:
-    openkcm.io/gcprootkey-uid: 9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+    openkcm.io/root-key-credentials: "true"
 type: kubernetes.io/tls
 stringData:
   tls.crt: <client certificate, PEM>
@@ -848,18 +765,21 @@ controller. The customer must put the new CA into the provider before the not-af
 access to the key. The trust store holds up to three trust anchors, so old and new can overlap.
 **Cut-off:** as in variant A.
 
-**Required for this method (to confirm with the Platform Mesh team):**
+**Required for this method:**
 - The `Certificate` and its Secret live in the cluster where the controller runs, not in the customer's workspace, so
   the customer never holds Krypton's private key. The controller then needs a client for its own cluster and the
   right to manage `certificates` and `secrets` there.
-- No `secretRef` in the spec. The controller derives the Secret's name from the GCPRootKey's UID and shows the
-  reference in the status. Otherwise a customer-editable pointer into the platform's cluster would let a customer
-  make the controller read another Secret.
+- `spec.auth.wifX509.secretRef` points at that Secret (name and namespace in the controller's cluster), and the
+  controller follows it to see every renewal. The controller writes the reference itself, once the Secret exists, with
+  a patch that touches only this field, so the UI's completion write is not overwritten. It accepts only the expected
+  name and namespace (derived from the UID) and sets
+  `CertificateReady: False` with the reason for any other value, so a customer cannot point it at another Secret
+  in the platform's cluster.
 
 **Open (Platform Mesh side), to settle before this variant is built:**
 - Whether the cluster where the controller runs has cert-manager with a reachable issuer for the Platform Mesh PKI.
-- Where the CA certificate, the subject CN and the not-after date come from: Krypton, or the generated Secret
-  (`ca.crt`, and the CN the controller put into the `Certificate`).
+- Whether the controller may update the spec of the root key (not only its status) through the APIExport. It writes
+  `secretRef` there.
 - One CA per tenant, or one shared CA with a subject CN per tenant. With a shared CA, tenant isolation rests on the
   CN condition in the provider alone.
 
@@ -870,16 +790,14 @@ For every method the customer also enters the KMS key resource name.
 | Kind | Variant | Customer enters | Secret from the customer |
 |---|---|---|---|
 | 1. Static secret | A. Service account key | the key file | yes, private key |
-| 2. Identity provider | A. Customer's IdP (OIDC) | issuer, client ID, audience, provider, token URL, secret | yes |
-| | B. Kubernetes service account | provider path | no |
-| 3. Certificate | A. Customer's certificate | CA, subject CN, provider, certificate, private key | yes, private key |
+| 2. Identity provider | A. Customer's IdP | issuer, client ID/secret, audience, provider path, token URL, scope | yes |
+| 3. Certificate | A. Customer's certificate | CA, subject CN, provider path, certificate, private key | yes |
 | | B. Platform Mesh PKI | provider path | no |
 
 | Kind | Variant | Customer renews |
 |---|---|---|
 | 1. Static secret | A. Service account key | the key |
 | 2. Identity provider | A. Customer's IdP (OIDC) | the client secret |
-| | B. Kubernetes service account | nothing (if the cluster keys were uploaded: at each cluster key rotation) |
 | 3. Certificate | A. Customer's certificate | the client certificate, at least every 390 days |
 | | B. Platform Mesh PKI | the CA in the provider, before it expires |
 

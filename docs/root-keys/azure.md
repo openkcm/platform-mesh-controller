@@ -10,14 +10,13 @@ looks, and what the method requires from Platform Mesh. The flow that is the sam
 |---|---|---|
 | [1. Static secret](#1-static-secret) | Client secret | [A. Client secret](#a-client-secret) |
 | [2. Identity provider](#2-identity-provider) | Federation | [A. Customer's IdP](#a-customers-identity-provider) |
-| | | [B. Kubernetes service account](#b-kubernetes-service-account) |
 
 Static secret: the customer hands over a client secret. Identity provider: Entra trusts a token from an outside
 issuer, so Azure holds no secret.
 
 Every method is documented here, but not every method is implemented on day one: the implementation takes them one
 by one by priority. The methods that send a secret to Krypton (the client secret and identity provider A) also
-wait for the secret hand-off to Krypton (see Common rules). Identity provider B needs a public cluster issuer.
+wait for the secret hand-off to Krypton (see Common rules).
 
 OpenKCM runs nothing in Azure and needs no Azure subscription or Entra tenant of its own. Every Azure resource below
 is created in the customer's tenant by a template the customer deploys. Krypton only calls the public Entra and Key
@@ -46,19 +45,30 @@ Krypton. They explain each method and are examples only: that part is designed b
 
 - **Before any method:** OpenKCM is enabled and the tenant exists (step 0). The customer has an RSA key (2048 to
   4096 bits) in a Key Vault that uses the "Azure role-based access control" permission model, and knows its key
-  identifier: in the portal, Keys, the key, a version, "Key Identifier":
+  identifier: portal > Keys > the key > a version > "Key Identifier",
   `https://<vault>.vault.azure.net/keys/<key name>/<key version>`. New vaults use that model by default. On an older
   vault that uses access policies, switching voids every existing policy, so the customer checks first.
 - **Key version:** wrap and unwrap URLs carry the version, and a key wrapped under one version cannot be unwrapped
   under another. So `keyVersion` is required, and after the key is Active the vault URL, key name, key version and
   method do not change: a different version is a different root key.
 - **Secrets:** all credentials of a method go into one Kubernetes Secret: the secret value and the identifiers that
-  belong to it (client ID). The UI creates it in the customer's kcp workspace and labels it with the
-  AzureRootKey's UID. The AzureRootKey only references it (`secretRef` with `name` and `namespace`). No secret value
-  is ever written into an AzureRootKey, its status, a log or an event. The entry names are fixed per method and
-  listed in each section.
-- **Secret changes:** the controller watches the labelled Secrets. When one changes (the customer replaces a value),
-  it tells Krypton that the root key has new credentials (working name, the API is designed by the Krypton team).
+  belong to it (client ID). The UI creates it in the customer's kcp workspace, in the namespace of the AzureRootKey,
+  after the draft exists, and names it `azurerootkey-<UID>` (see the next rule). It labels it with
+  `openkcm.io/root-key-credentials: "true"`. The AzureRootKey only references it (`secretRef` with `name` and
+  `namespace`), which the UI sets when it completes the key. No secret value is ever written into an AzureRootKey, its
+  status, a log or an event. The entry names are fixed per method and listed in each section.
+- **Secret name and link:** every method names the Secret `azurerootkey-<UID>`, where UID is the `metadata.uid` of the
+  AzureRootKey. The API server assigns it when the draft is created, so the UI reads it from the draft before it creates
+  the Secret. The UID is unique across all workspaces, so the name alone identifies the root key. The controller accepts
+  only that name, in the AzureRootKey's own namespace; if `secretRef` says anything else, it reads no Secret and shows
+  the reason in the status. So a Secret belongs to exactly one AzureRootKey: two root keys never share one, a customer
+  cannot point a root key at another Secret, and a root key that is deleted and created again gets a new UID and so a
+  new Secret. A rotation replaces the values in the same Secret.
+- **Deleting the root key (open):** a Secret named after the UID has no use once the AzureRootKey is gone. It is not
+  decided who deletes it: the controller with a finalizer (it then needs the right to delete Secrets there) or the UI.
+- **Secret changes:** the controller watches the labelled Secrets. When one changes (the customer replaces a value), it
+  finds the root key from the UID in the Secret name and tells Krypton that the root key has new credentials (working
+  name, the API is designed by the Krypton team).
 - **Secret hand-off to Krypton (open):** the target is that nothing unencrypted is stored at Krypton or travels to
   it, planned through a public key taken from Krypton. That endpoint does not exist and is not agreed. For now the
   value stays in the Kubernetes Secret as is, and how it reaches Krypton is open.
@@ -67,9 +77,7 @@ Krypton. They explain each method and are examples only: that part is designed b
   "latest"), so existing AzureRootKeys are migrated to the new shape. `auth.tenantId` is shared by all methods and
   each method has its own block; for the client secret the client ID is not in the spec but in the Secret. For the
   customer's identity provider the Secret holds the identity provider's client ID and secret, and the spec holds the
-  Azure app's client ID. For the Kubernetes service account there is no Secret: the spec holds the Azure app's client
-  ID and the new `status.setupData` holds the issuer, subject and audience. `tenantNameRef`, `vaultUrl`, `keyName`,
-  `keyVersion` and `lifecycle` stay.
+  Azure app's client ID. `tenantNameRef`, `vaultUrl`, `keyName`, `keyVersion` and `lifecycle` stay.
 - **Vault firewall:** if the vault restricts network access, OpenKCM's addresses must be on its allow list (public
   IPv4 only). A vault open to private endpoints only cannot be reached. Open: stable egress addresses.
 
@@ -77,12 +85,11 @@ Krypton. They explain each method and are examples only: that part is designed b
 
 | Building block | Needed by | Offered today |
 |---|---|---|
-| Secret in the customer's kcp workspace | client secret, customer's IdP | yes |
-| Controller may read and watch those Secrets (APIExport claim on `secrets`) | the same | no |
-| Hand-off of the credentials to Krypton, not in plain text | the same | no |
-| Public service-account issuer of the Krypton cluster | Kubernetes service account | not confirmed (Gardener can) |
+| Kubernetes Secret in the customer's kcp workspace | both methods | yes |
+| Permission for the controller to read and watch those Secrets | both methods | no |
+| Hand-off of that Secret to Krypton, not in plain text | both methods | no |
 
-The hand-off is described in Common rules.
+The permission is an APIExport permission claim on `secrets`; the APIExport claims none today.
 
 ## Step 0. Tenant creation (the same for every method)
 
@@ -115,19 +122,19 @@ only wrap and unwrap with the customer's vault.
 
 | # | Value | Where it comes from | Secret | Goes into | Step |
 |---|---|---|---|---|---|
-| 1 | Key identifier URL | Key Identifier of a key version | no | `vaultUrl`, `keyName`, `keyVersion` | 1 |
+| 1 | Key identifier URL | the Key Vault key (see Common rules) | no | `spec.vaultUrl`, `keyName`, `keyVersion` | 1 |
 | 2 | Entra tenant ID | output `tenantId` of the template | no | `spec.auth.tenantId` | 6 |
 | 3 | Client ID | output `clientId` of the template | no | Secret entry `clientId` | 6 |
 | 4 | Client secret value | added to the app in step 5, shown once | yes | Secret entry `clientSecret` | 6 |
 
-Not typed by the customer: `spec.tenantNameRef` and `spec.auth.method: ClientSecret` (set by the UI with the draft),
-and `spec.auth.clientSecret.secretRef` (set when the UI creates the Secret from values 3 and 4). The UI splits the
-key identifier URL into the three spec fields. The client ID is not secret but sits in the Secret with the client
-secret, so the credentials are in one place and a rotation is one write.
+Not typed by the customer: `spec.tenantNameRef` and `spec.auth.method: ClientSecret` (set by the UI with the draft), and
+`spec.auth.clientSecret.secretRef` (set when the UI creates the Secret `azurerootkey-<UID>` from values 3 and 4). The UI
+splits the key identifier URL into the three spec fields. The client ID is not secret but sits in the Secret with the
+client secret, so the credentials are in one place and a rotation is one write.
 
 **What the customer does:**
 1. In the UI, picks Azure Key Vault with a client secret and pastes the key identifier URL. The customer copies it
-   in the Azure portal: the vault, Keys, the key, one version, Key Identifier. It must be the URL of a
+   in the Azure portal: the vault > Keys > the key > one version > Key Identifier. It must be the URL of a
    version, because a key wrapped under one version cannot be unwrapped under another. The UI creates a draft
    AzureRootKey from it. This method needs nothing from Krypton.
 2. The UI gives a Bicep file already filled in with the vault name and an app name. Bicep is Azure's template
@@ -140,13 +147,13 @@ secret, so the credentials are in one place and a rotation is one write.
     - `clientId`: the ID of the app registration the file created. It names the identity Krypton logs in as.
 
    Neither is secret. The customer copies both into the UI in step 6.
-5. The customer adds a client secret to the app, in the portal (App registrations, the app, Certificates &
+5. The customer adds a client secret to the app, in the portal (App registrations > the app > Certificates &
    secrets) or with the Azure CLI. Entra shows it once: the customer copies the **Value** column, not the Secret ID.
    In the CLI the command must use `--append`; by default it deletes the app's old secrets, which would cut off
    OpenKCM until it gets the new one. The secret lasts at most 24 months; Microsoft recommends under 12.
-6. The customer enters the tenant ID, the client ID and the secret in the UI. The UI first creates the Secret with
-   the client ID and the secret, then saves the tenant ID and `secretRef` to the AzureRootKey. That completes the
-   key and starts registration.
+6. The customer enters the tenant ID, the client ID and the secret in the UI. The UI first creates the Secret
+   `azurerootkey-<UID>` (the UID of the draft) with the client ID and the secret, then saves the tenant ID and
+   `secretRef` to the AzureRootKey. That completes the key and starts registration.
 
 **What the Bicep file creates** in the customer's tenant and vault:
 - **An app registration**, the program's ID card: a name, a client ID, and a place for its client secret. It is
@@ -163,12 +170,21 @@ secret, so the credentials are in one place and a rotation is one write.
 file gives it on the whole vault, as Microsoft recommends, so the app can use every key in that vault; the L1 key
 should therefore sit in a vault of its own. Giving it on the single key also works, but Microsoft discourages it.
 
+**Other ways to create the same three objects:**
+- **Portal.** App registrations > New registration, this directory only, no redirect address; copy the client ID and
+  tenant ID. The portal creates the service principal with it. Then Key Vault > Access control (IAM) > Add role
+  assignment > the role > the app.
+- **CLI.** `az ad app create`, `az ad sp create --id <client ID>`, `az role assignment create`. Or the single
+  `az ad sp create-for-rbac --role ... --scopes <vault resource ID>`, which also creates the secret and prints it.
+- **ARM template or Terraform.** The Graph resource types exist for Bicep; this research found no ARM JSON
+  equivalent for the app registration, and did not check Terraform (a secret created there would sit in its state).
+
 **Where the values are kept:**
 - Client ID and client secret: in a Kubernetes Secret in the customer's kcp workspace, created by the UI in step 6.
   The AzureRootKey holds only the reference.
 - Everything else: in the AzureRootKey spec.
 
-**Example:**
+**Example**:
 
 The AzureRootKey:
 
@@ -178,6 +194,7 @@ kind: AzureRootKey
 metadata:
   name: acme-azure-root
   namespace: default
+  uid: 2e8f5a13-d7b6-4c90-b4a1-6f3d9c0e7b25
 spec:
   tenantNameRef: acme
   vaultUrl: https://acme-prod-kv.vault.azure.net
@@ -188,7 +205,7 @@ spec:
     tenantId: 8a1f2c3d-4b5e-4f60-9a7b-8c9d0e1f2a3b
     clientSecret:
       secretRef:
-        name: acme-azure-client-secret
+        name: azurerootkey-2e8f5a13-d7b6-4c90-b4a1-6f3d9c0e7b25
         namespace: default
 ```
 
@@ -198,7 +215,7 @@ The Secret the UI creates and the AzureRootKey points at:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: acme-azure-client-secret
+  name: azurerootkey-2e8f5a13-d7b6-4c90-b4a1-6f3d9c0e7b25
   namespace: default
 type: Opaque
 stringData:
@@ -224,7 +241,7 @@ vault scope a vault that holds only this key.
 **Advantage:** works with any Azure tenant and needs nothing on the Platform Mesh side except the Secret.
 **Downsides:**
 - The secret is long-lived and stored at OpenKCM. Microsoft says client secrets should not be used in production and
-  recommends federated credentials (see 2).
+  recommends federated credentials (identity provider A) instead.
 - The customer's tenant may block client secrets by policy.
 - The secret expires after at most 24 months. The customer renews it by hand: add a new secret with `--append`,
   update the Secret in the UI, delete the old one. After the expiry date Key Vault calls fail, and OpenKCM learns of
@@ -238,9 +255,8 @@ hour.
 
 ## 2. Identity provider
 
-Entra is told to trust tokens from an outside issuer. Azure holds no secret in this kind. There are two variants: in
-A the issuer is the customer's own OpenID Connect (OIDC) identity provider; in B it is the Kubernetes cluster where
-Krypton runs. OpenKCM provides no identity provider.
+Entra is told to trust tokens from an outside issuer: the customer's own OpenID Connect (OIDC) identity provider.
+Azure holds no secret in this kind. OpenKCM provides no identity provider.
 
 ### A. Customer's identity provider
 
@@ -265,27 +281,38 @@ from the issuer address to check the token's signature.
 
 | # | Value | Where it comes from | Secret | Goes into | Step |
 |---|---|---|---|---|---|
-| 1 | Key identifier URL | Key Identifier of a key version | no | `vaultUrl`, `keyName`, `keyVersion` | 2 |
-| 2 | Issuer address | the customer's identity provider | no | `spec.auth.federatedIdp.issuerUrl` | 2 |
+| 1 | Key identifier URL | the Key Vault key (see Common rules) | no | `spec.vaultUrl`, `keyName`, `keyVersion` | 2 |
+| 2 | Issuer address | the customer's identity provider | no | the Bicep file only (kept in the UI form) | 2 |
 | 3 | Identity provider client ID | the application registered for OpenKCM | no | Secret entry `clientId` | 2 |
 | 4 | Entra tenant ID | output `tenantId` of the template | no | `spec.auth.tenantId` | 5 |
 | 5 | Entra client ID | output `clientId` of the template | no | `spec.auth.federatedIdp.appClientId` | 5 |
 | 6 | Token endpoint | the customer's identity provider | no | `spec.auth.federatedIdp.tokenEndpoint` | 5 |
 | 7 | Identity provider client secret | the application registered for OpenKCM | yes | Secret entry `clientSecret` | 5 |
+| 8 | Scope | the identity provider, if it needs one (see "About the scope") | no | `spec.auth.federatedIdp.scope` | 5 |
 
-Not typed by the customer: `spec.tenantNameRef` and `spec.auth.method: FederatedIdP` (set by the UI with the draft),
-and `spec.auth.federatedIdp.secretRef` (set when the UI creates the Secret from values 3 and 7). There are two client
-IDs: the identity provider's (value 3, in the Secret) and the Azure app's (value 5, in the spec). The identity
-provider's client ID is not secret but sits in the Secret with its client secret, so the credentials are in one place
-and a rotation is one write. The template needs it in step 3, so the customer enters it in step 2 and the UI keeps it
-in the form until it creates the Secret in step 5; the draft AzureRootKey does not hold it.
+Not typed by the customer: `spec.tenantNameRef` and `spec.auth.method: FederatedIdP` (set by the UI with the draft), and
+`spec.auth.federatedIdp.secretRef` (set when the UI creates the Secret `azurerootkey-<UID>` from values 3 and 7). There
+are two client IDs: the identity provider's (value 3, in the Secret) and the Azure app's (value 5, in the spec). The
+identity provider's client ID is not secret but sits in the Secret with its client secret, so the credentials are in one
+place and a rotation is one write. The Bicep file needs the issuer address and the identity provider's client ID in step
+3, so the customer enters them in step 2 and the UI keeps them in the form: the client ID until it creates the Secret in
+step 5, the issuer address until the Bicep file is shown. The draft AzureRootKey holds neither. The controller does not
+send the issuer address to Krypton: only the federated credential in Azure needs it, and Krypton uses the token
+endpoint.
+
+**About the scope:** the scope is a standard OAuth 2.0 parameter of the token request that Krypton sends to the
+customer's identity provider (not to Entra). It tells the provider what the token is for, and Azure never sees it. The
+field exists because some providers refuse the request without one (Microsoft Entra ID as the customer's provider
+needs the resource identifier with `/.default`, Okta needs a scope the customer created), while others apply a
+default, and then the customer leaves it empty. The customer takes the value from the provider's documentation for
+the client credentials grant, and Krypton sends it as entered.
 
 **What the customer does:**
 1. In their identity provider, registers an application for OpenKCM as described above, and notes the issuer address,
-   the token endpoint, the client ID and the client secret.
+   the token endpoint, the client ID, the client secret and the scope if the identity provider needs one.
 2. In the UI, picks Azure Key Vault with OIDC (own identity provider) and enters the key identifier URL, the issuer
-   address and the identity provider's client ID. The UI creates a draft AzureRootKey with all of them except the
-   client ID. This method needs nothing from Krypton.
+   address and the identity provider's client ID. The UI creates a draft AzureRootKey with the key identifier parts.
+   This method needs nothing from Krypton.
 3. The UI gives a Bicep file (Azure's template language: a text file that lists the objects to create) already filled
    in with the vault name, an app name, the issuer address and the client ID as the subject. In Cloud Shell or a
    terminal logged in to Azure, the customer deploys it into the vault's resource group with an Azure CLI deploy
@@ -296,10 +323,10 @@ in the form until it creates the Secret in step 5; the draft AzureRootKey does n
       names the identity Krypton acts as.
 
    Neither is secret. The customer copies both into the UI in step 5.
-5. The customer enters the Entra tenant ID, the Entra client ID, the token endpoint and the client secret in the UI.
-   The UI first creates the Secret with the identity provider's client ID and client secret, then saves the tenant
-   ID, the Entra client ID, the token endpoint and `secretRef` to the AzureRootKey. That completes the key and starts
-   registration.
+5. The customer enters the Entra tenant ID, the Entra client ID, the token endpoint, the scope (if any) and the
+   client secret in the UI. The UI first creates the Secret `azurerootkey-<UID>` (the UID of the draft) with the
+   identity provider's client ID and client secret, then saves the tenant ID, the Entra client ID, the token endpoint,
+   the scope and `secretRef` to the AzureRootKey. That completes the key and starts registration.
 
 **To verify per identity provider:** the file uses the client ID as the subject. The `sub` claim of a
 client-credentials token is not always the client ID (some providers put another identifier there). Entra compares
@@ -321,9 +348,16 @@ really puts into the token.
 - It creates no client secret, so nothing in Azure holds a credential. It does not create the key or the vault: they
   must already exist.
 
+**Other ways to create the same objects:** in the portal, App registrations > New registration (this directory
+only), then Certificates & secrets > Federated credentials > Add credential, scenario "Other issuer" (issuer,
+subject identifier, audience, name), then Key Vault > Access control (IAM) > Add role assignment > the role >
+the app. With the CLI, the federated credential is `az ad app federated-credential create`.
+
 **Where the values are kept:**
 - Identity provider client ID and client secret: in a Kubernetes Secret in the customer's kcp workspace, created by
   the UI in step 5. The AzureRootKey holds only the reference.
+- Issuer address: from the customer's identity provider, public. Not kept in the AzureRootKey: the UI uses it only to
+  fill the Bicep file.
 - Everything else: in the AzureRootKey spec.
 
 **Example:**
@@ -334,6 +368,7 @@ kind: AzureRootKey
 metadata:
   name: acme-azure-root
   namespace: default
+  uid: 2e8f5a13-d7b6-4c90-b4a1-6f3d9c0e7b25
 spec:
   tenantNameRef: acme
   vaultUrl: https://acme-prod-kv.vault.azure.net
@@ -343,11 +378,11 @@ spec:
     method: FederatedIdP
     tenantId: 8a1f2c3d-4b5e-4f60-9a7b-8c9d0e1f2a3b
     federatedIdp:
-      issuerUrl: https://idp.example.com/acme
       tokenEndpoint: https://idp.example.com/acme/oauth2/token
+      scope: <scope, if the IdP needs one>
       appClientId: 5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a
       secretRef:
-        name: acme-idp-client-secret
+        name: azurerootkey-2e8f5a13-d7b6-4c90-b4a1-6f3d9c0e7b25
         namespace: default
 ```
 
@@ -357,7 +392,7 @@ The Secret the UI creates and the AzureRootKey points at:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: acme-idp-client-secret
+  name: azurerootkey-2e8f5a13-d7b6-4c90-b4a1-6f3d9c0e7b25
   namespace: default
 type: Opaque
 stringData:
@@ -365,8 +400,8 @@ stringData:
   clientSecret: "<identity provider client secret>"
 ```
 
-**What the controller sends:** the method, the tenant ID, the vault URL, the key name, the key version, the Entra
-tenant ID, the Entra client ID, the token endpoint, and the identity provider's client ID and client secret (how the
+**What the controller sends:** the method, the tenant ID, the vault URL, the key name, the key version, the Entra tenant
+ID, the Entra client ID, the token endpoint, the scope, and the identity provider's client ID and client secret (how the
 secret reaches Krypton is open, see Common rules). Registration, validation and activation then follow (see the
 registration section).
 
@@ -397,127 +432,6 @@ and can cut it off there.
 removes the role assignment (role changes take up to 10 minutes). The strongest cut is disabling the key in Key
 Vault. A token already issued lives up to about one hour.
 
-### B. Kubernetes service account
-
-**What it is:** the issuer is the Kubernetes cluster where Krypton runs. Kubernetes signs a short-lived token for
-Krypton's service account, and Entra exchanges it for an Entra token. The trust is a **federated credential** on the
-app registration that names the cluster as the issuer and Krypton's service account as the subject. Entra downloads
-the cluster's public keys from the issuer address to check the token's signature. There is no identity provider, no
-secret and no `secretRef`. This variant only applies if Krypton runs in Kubernetes, and it is an option for whoever
-deploys it that way, not a rule.
-
-**Before anything:**
-- The customer has the key and the vault described in Common rules, and knows the key identifier URL.
-- The person who deploys can create an app registration with its service principal, add a federated credential to it
-  (as the app's owner, or as Application Administrator or Cloud Application Administrator) and assign roles on the
-  vault (Owner or User Access Administrator).
-- A terminal logged in to Azure with the Azure CLI. Cloud Shell has it. The portal route below needs no tools.
-- On OpenKCM's side, the cluster where Krypton runs publishes its service-account issuer at a public address, because
-  Entra must fetch the keys from it.
-
-**What the customer provides:**
-
-| # | Value | Where it comes from | Secret | Goes into | Step |
-|---|---|---|---|---|---|
-| 1 | Key identifier URL | Key Identifier of a key version | no | `vaultUrl`, `keyName`, `keyVersion` | 1 |
-| 2 | Entra tenant ID | output `tenantId` of the template | no | `spec.auth.tenantId` | 5 |
-| 3 | Entra client ID | output `clientId` of the template | no | `spec.auth.federatedServiceAccount.appClientId` | 5 |
-
-Not typed by the customer: `spec.tenantNameRef` and `spec.auth.method: FederatedServiceAccount` (set by the UI with
-the draft). There is no secret and no `secretRef`. The issuer address, the subject and the audience come from Krypton
-as setup data and go into the template.
-
-**What the customer does:**
-1. In the UI, picks Azure Key Vault with OIDC (service account) and pastes the key identifier URL. The UI creates a
-   draft AzureRootKey from it.
-2. The controller asks Krypton for the setup data: the issuer address of the cluster, the subject
-   (`system:serviceaccount:<namespace>:<name>` of Krypton's service account) and the audience
-   (`api://AzureADTokenExchange`). It writes them into the status.
-3. The UI gives a Bicep file (Azure's template language: a text file that lists the objects to create) already filled
-   in with the vault name, an app name and the setup data. In Cloud Shell or a terminal logged in to Azure, the
-   customer deploys it into the vault's resource group with an Azure CLI deploy command. Running it again changes
-   nothing.
-4. When the deployment finishes it returns two outputs, values the file declares so that the customer can read them:
-    - `tenantId`: the ID of the customer's Entra tenant. Krypton exchanges the token at this tenant.
-    - `clientId`: the ID of the Azure app registration the file created. It names the identity Krypton acts as.
-
-   Neither is secret. The customer copies both into the UI in step 5.
-5. The customer enters the Entra tenant ID and the Entra client ID in the UI. The UI saves them to the AzureRootKey.
-   That completes the key and starts registration.
-
-**What the Bicep file creates** in the customer's tenant and vault:
-- **An app registration**, the program's ID card: a name and a client ID, limited to the customer's Entra tenant.
-- **A service principal**, the program's account in that tenant, linked to the registration by the client ID. Entra
-  signs in the account and roles are given to it, not to the ID card. Together they are the identity Krypton acts as
-  after the exchange.
-- **A federated credential** on the app registration: the trust itself. It holds the cluster's issuer address,
-  Krypton's service account as the subject and the audience, and Entra accepts Krypton's token only when all three
-  match exactly.
-- **A role assignment** on the vault: gives the service principal the built-in role `Key Vault Crypto Service
-  Encryption User`. It allows only wrap and unwrap with a key (and reading its public part), and cannot create,
-  change or delete keys or read secrets and certificates. It is given on the whole vault, as Microsoft recommends, so
-  the L1 key should sit in a vault of its own.
-- It creates no client secret, so nothing in Azure holds a credential. It does not create the key or the vault: they
-  must already exist.
-
-**Where the values are kept:** nothing secret. The setup data in the status; the key identifier parts, the Entra
-tenant ID and the Entra client ID in the spec.
-
-**Example:**
-
-```yaml
-apiVersion: operations.openkcm.io/v1alpha1
-kind: AzureRootKey
-metadata:
-  name: acme-azure-root
-  namespace: default
-spec:
-  tenantNameRef: acme
-  vaultUrl: https://acme-prod-kv.vault.azure.net
-  keyName: openkcm-l1
-  keyVersion: 0698c2156c1a4e1da5b6bab6f6422fd6
-  auth:
-    method: FederatedServiceAccount
-    tenantId: 8a1f2c3d-4b5e-4f60-9a7b-8c9d0e1f2a3b
-    federatedServiceAccount:
-      appClientId: 5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a
-status:
-  setupData:
-    issuerUrl: https://oidc.krypton-cluster.example.com
-    subject: system:serviceaccount:krypton:krypton
-    audience: api://AzureADTokenExchange
-```
-
-**What the controller sends:** the method, the tenant ID, the vault URL, the key name, the key version, the Entra
-tenant ID and the Entra client ID. No secret. Registration, validation and activation then follow (see the
-registration section).
-
-**Required from Platform Mesh:** the cluster where Krypton runs must publish its service-account issuer at a public
-address. On Gardener, the managed issuer serves the cluster's discovery documents from the Gardener Discovery Server
-(the Garden cluster must have it deployed); once enabled it cannot be disabled. No secret and nothing to hand over to
-Krypton.
-
-**How Krypton authenticates (example):** it reads its service-account token from the file Kubernetes mounts into its
-pod. The token is issued for the audience `api://AzureADTokenExchange`. Krypton sends it to the customer's Entra
-tenant together with the Azure app's client ID. Entra downloads the cluster's public keys from the issuer address,
-checks the token against the federated credential, and returns an access token valid for about one hour. Krypton then
-sends its wrap and unwrap requests to the vault with that token.
-
-**Tenant isolation:** weaker than the other variants. The subject is Krypton's service account, the same for every
-customer, so the federated credential does not tell customers apart. Only the separate app registration and role of
-each customer keep them apart, and at vault scope a vault that holds only this key. A wrap or unwrap call cannot be
-pinned to a context as on AWS.
-**Advantage:** no secret at all. Kubernetes issues and rotates the short-lived token, and the customer enters only the
-tenant ID and the client ID.
-**Downsides:**
-- Every customer trusts the service-account issuer of the cluster where Krypton runs. Krypton runs in several
-  clusters and regions, so each cluster is a different issuer, and moving Krypton to another cluster breaks every
-  customer's trust.
-
-**Cut-off:** the customer deletes the federated credential, removes the role assignment or disables the app (role
-changes take up to 10 minutes). The strongest cut is disabling the key in Key Vault. A token already issued lives up
-to about one hour.
-
 ## Quick comparison
 
 For every method the customer also enters the key identifier URL.
@@ -525,14 +439,12 @@ For every method the customer also enters the key identifier URL.
 | Kind | Variant | Customer enters | Secret from the customer |
 |---|---|---|---|
 | 1. Static secret | A. Client secret | Entra tenant ID, client ID, client secret | yes, client secret |
-| 2. Identity provider | A. Customer's IdP | issuer, IdP client ID and secret, Entra IDs, token URL | yes |
-| | B. Kubernetes service account | Entra tenant ID, Entra client ID | no |
+| 2. Identity provider | A. Customer's IdP | issuer, IdP client ID/secret, Entra tenant/app ID, token URL, scope | yes |
 
 | Kind | Variant | Customer renews |
 |---|---|---|
 | 1. Static secret | A. Client secret | the client secret, at most every 24 months |
 | 2. Identity provider | A. Customer's identity provider | the identity provider's client secret |
-| | B. Kubernetes service account | nothing |
 
 A changed Secret reaches Krypton through the controller (see Secret changes).
 

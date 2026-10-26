@@ -30,22 +30,23 @@ sequenceDiagram
     UI->>K: creates a draft root key (tenant, method, key reference, other template values)
     K->>C: the controller sees the draft
 
-    opt only if the method needs setup data (every AWS method does)
-      C->>KR: gRPC prepare setup data (working name)
-      KR-->>C: setup data for the customer
-      C->>K: writes it into the root key status
+    opt only for AWS (every AWS method uses the encryption context)
+      C->>KR: gRPC get the encryption context of the tenant (working name)
+      KR-->>C: encryption context
+      C->>K: writes it into status.encryptionContext (tenant)
     end
 
     opt only for the Platform Mesh PKI (Platform Mesh generates the certificate, the customer gives none)
-      Note over C: creates a cert-manager Certificate in its own cluster.<br/>cert-manager issues it into a Secret there
+      Note over C: creates a cert-manager Certificate in its own cluster.<br/>cert-manager issues it into a Secret
+      C->>K: secretRef to that Secret in the spec, CertificateReady in the status
     end
 
-    K-->>UI: root key status with the setup data
+    K-->>UI: root key status (encryption context, CertificateReady)
     UI-->>U: setup template for the provider, already filled in
     Note over U: sets up the provider side with the template and reads what it returns
     U->>UI: enters what the method needs (ARNs, or credentials)
     opt only if the method has a credential from the customer
-      UI->>K: first creates the Secret with the credentials, labelled with the root key UID
+      UI->>K: first creates the Secret named after the root key UID, with the credentials
     end
     UI->>K: completes the root key (ARNs and the reference to the Secret)
     K->>C: the controller sees the complete root key
@@ -106,22 +107,21 @@ sequenceDiagram
 Every method also sends the method, the tenant ID, the KMS key ARN and the region in the register call. The
 methods are described in [aws.md](aws.md).
 
-| Kind | Variant | Setup data in the status | Customer enters after the template |
+| Kind | Variant | In the status | Customer enters after the template |
 |---|---|---|---|
 | 1. Static secret | A. Access key | encryption context | access key ID, secret, role ARN |
-| 2. Identity provider | A. Customer's IdP | encryption context | role ARN, token endpoint, client secret |
-| | B. Kubernetes service account | cluster issuer, audience, subject, encryption context | role ARN |
-| | C. Customer's SAML identity provider (after OIDC) | encryption context | 2 ARNs, user name, password |
+| 2. Identity provider | A. Customer's IdP | encryption context | role ARN, token endpoint, client ID, client secret |
+| | B. Customer's SAML identity provider (after OIDC) | encryption context | 2 ARNs, user name, password |
 | 3. Certificate | A. Customer's certificate | encryption context | 3 ARNs, certificate, private key |
-| | B. Platform Mesh PKI | CA certificate, subject CN, encryption context, not-after | 3 ARNs |
+| | B. Platform Mesh PKI | encryption context, CertificateReady | 3 ARNs |
 
-The methods that send a secret to Krypton (static secret, identity provider A and C, certificates A and B) use the
+The methods that send a secret to Krypton (static secret, identity provider A and B, certificates A and B) use the
 hand-off `opt` block of the generic flow. How the secret reaches Krypton is not agreed yet.
 
 For all of them except the Platform Mesh PKI, the credentials stay in a Kubernetes Secret in the customer's
 workspace. The UI creates it before it completes the root key, and the AWSRootKey only references it. For the
-Platform Mesh PKI, cert-manager creates the Secret in the controller's cluster, and the controller shows the
-reference in the status.
+Platform Mesh PKI, cert-manager creates the Secret in the controller's cluster, and the AWSRootKey references it in
+the spec.
 
 ## How Krypton authenticates to AWS, per method (examples)
 
@@ -168,27 +168,7 @@ sequenceDiagram
   KMS-->>KR: ciphertext, plaintext
 ```
 
-#### B. Kubernetes service account
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant KR as Krypton
-  participant ISS as Krypton cluster issuer address
-  participant STS as AWS STS
-  participant KMS as Customer KMS
-
-  Note over KR: reads the service-account token that Kubernetes mounts into the pod
-  KR->>STS: AssumeRoleWithWebIdentity (role ARN, service-account token)
-  STS->>ISS: GET discovery document and key set
-  ISS-->>STS: public key named by the kid in the token
-  Note over STS: verifies the signature with the public key.<br/>Checks exp, aud and the role trust policy
-  STS-->>KR: temporary credentials
-  KR->>KMS: Encrypt and Decrypt with the encryption context, signed with the temporary credentials
-  KMS-->>KR: ciphertext, plaintext
-```
-
-#### C. Customer's SAML identity provider
+#### B. Customer's SAML identity provider
 
 ```mermaid
 sequenceDiagram
