@@ -33,20 +33,19 @@ example only.
   workspace, in the namespace of the GCPRootKey, after the draft exists, and names it `gcprootkey-<UID>` (see the next
   rule). It labels it with `openkcm.io/root-key-credentials: "true"`. The GCPRootKey only references it (`secretRef`
   with `name` and `namespace`), which the UI sets when it completes the key. For the Platform Mesh PKI cert-manager
-  creates the Secret in the controller's cluster instead, under the same name (see 3. B), and the controller writes the
+  creates the Secret instead, in the same namespace and under the same name (see 3. B), and the controller writes the
   reference. No secret value is ever written into a GCPRootKey, its status, a log or an event. The entry names are
   fixed per method and listed in each section.
 - **Secret name and link:** every method names the Secret `gcprootkey-<UID>`, where UID is the `metadata.uid` of the
   GCPRootKey. The API server assigns it when the draft is created, so the UI reads it from the draft before it creates
-  the Secret. The UID is unique across all workspaces, so the name alone identifies the root key. The controller
-  accepts only that name (in the GCPRootKey's own namespace, or in the platform's namespace for the Platform Mesh
-  PKI); if `secretRef` says anything else, it reads no Secret and shows the reason in the status. So a Secret belongs
-  to exactly one GCPRootKey: two root keys never share one, a customer cannot point a root key at another Secret, and
-  a root key that is deleted and created again gets a new UID and so a new Secret. A rotation replaces the values in
-  the same Secret.
-- **Deleting the root key (open):** a Secret named after the UID has no use once the GCPRootKey is gone. For the
-  Platform Mesh PKI a finalizer deletes the Secret. For a Secret the UI created in the customer's workspace, it is not
-  decided who deletes it: the controller with a finalizer (it then needs the right to delete Secrets there) or the UI.
+  the Secret. The UID is unique across all workspaces, so the name alone identifies the root key. The controller accepts
+  only that name, in the GCPRootKey's own namespace; if `secretRef` says anything else, it reads no Secret and shows the
+  reason in the status. So a Secret belongs to exactly one GCPRootKey: two root keys never share one, a customer cannot
+  point a root key at another Secret, and a root key that is deleted and created again gets a new UID and so a new
+  Secret. A rotation replaces the values in the same Secret.
+- **Deleting the root key (open):** a Secret named after the UID has no use once the GCPRootKey is gone. It is not
+  decided who deletes it (and, for the Platform Mesh PKI, the `Certificate`): the controller with a finalizer (it then
+  needs the right to delete them) or the UI.
 - **Secret hand-off to Krypton (open):** the target is that nothing unencrypted is stored at Krypton or travels to it,
   planned through a public key taken from Krypton, which does not exist yet. For now the value stays in the
   Kubernetes Secret as is, and how it reaches Krypton is open.
@@ -74,7 +73,7 @@ example only.
 | Kubernetes Secret in the customer's kcp workspace | key file, customer's IdP, customer's certificate | yes |
 | Permission for the controller to read and watch those Secrets | key file, IdP, customer's certificate | no |
 | Hand-off of a Secret to Krypton, not in plain text | every method | no |
-| OpenBao PKI with a CA, and cert-manager with an issuer for it, in the controller's cluster | Platform Mesh PKI | no |
+| OpenBao PKI with a CA, and cert-manager for kcp workspaces with an issuer for it | Platform Mesh PKI | no |
 
 The permission is an APIExport permission claim on `secrets`; the APIExport claims none today. Whether the PKI has
 one CA per tenant or one shared CA is open.
@@ -605,17 +604,16 @@ cuts tokens already issued.
 **Who the CA is:** the Platform Mesh PKI (OpenBao). OpenKCM runs no CA of its own. The customer does not provide the
 certificate: Platform Mesh generates it. The controller creates a cert-manager `Certificate` whose issuer is the
 Platform Mesh PKI, and cert-manager writes the short-lived certificate and its key into a Secret of type
-`kubernetes.io/tls`, renewing it before it expires. The `Certificate` and the Secret live in the cluster where the
-controller runs (a normal Kubernetes cluster, where cert-manager can run; a kcp workspace has no workloads), in a
-namespace owned by the platform. The customer never sees or touches them. The GCPRootKey points at the Secret with
-`secretRef` in the spec, as in 3. A, but the controller writes it, not the UI: the customer gives no secret, so the
-UI creates no Secret. The name is the same as in every other method, derived from the UID of the GCPRootKey
-(`gcprootkey-<UID>`), which the API server assigns when the draft is created and which is unique across all
-workspaces. The controller creates the `Certificate`
-and the Secret under that name and, when the Secret exists, writes the reference into the spec. The customer can edit
-the spec, so on every reconcile the controller accepts only the expected name and namespace; if the field says
-anything else, it reads no Secret and shows the reason in the status. This way the controller can watch the Secret
-and follow every renewal. Krypton cannot fetch a
+`kubernetes.io/tls`, renewing it before it expires. The `Certificate` and the Secret live in kcp, in the customer's
+workspace and in the namespace of the GCPRootKey, like every other Secret here: Platform Mesh runs cert-manager for
+kcp workspaces, and cert-manager writes the Secret next to the `Certificate`. The UI never shows the private key. The
+GCPRootKey points at the Secret with `secretRef` in the spec, as in 3. A, but the controller writes it, not the UI:
+the customer gives no secret, so the UI creates no Secret. The name is known upfront, the same as in every other
+method: `gcprootkey-<UID>`, derived from the UID that the API server assigns when the draft is created. The
+controller creates the `Certificate` with that Secret name and writes the reference into the spec in the same step.
+The customer can edit the spec, so on every reconcile the controller accepts only the expected name and namespace; if
+the field says anything else, it reads no Secret and shows the reason in the status. This way the controller can
+watch the Secret and follow every renewal. Krypton cannot fetch a
 certificate from Platform Mesh itself, so the controller reads the Secret and sends the certificate to Krypton. The
 customer gets the CA's public certificate from the GCPRootKey status, and the Terraform file puts it into Google.
 
@@ -628,16 +626,17 @@ customer gets the CA's public certificate from the GCPRootKey status, and the Te
 
 The UI sets the rest: `spec.tenantNameRef`, `spec.auth.method: WIFX509`,
 `spec.auth.wifX509.certificateSource: PlatformMesh`. The controller sets `spec.auth.wifX509.secretRef` (the name and
-namespace of the Secret that cert-manager creates in the controller's cluster) once the Secret exists. The customer
+namespace of the Secret that cert-manager creates) when it creates the `Certificate`. The customer
 gives no secret and does not choose this reference.
 
 **What the customer does:**
 1. In the UI, picks GCP KMS with a certificate (Platform Mesh PKI) and enters the KMS key resource name. The UI
    creates a draft GCPRootKey.
-2. The controller creates the cert-manager `Certificate` for this root key (see the example below). When cert-manager
-   has created the Secret, the controller writes `spec.auth.wifX509.secretRef` (a patch that touches only this field)
-   and sets `CertificateReady: True`. While the certificate is not issued, the status shows a condition (for example
-   `CertificateReady: False`) with the reason, such as the Platform Mesh PKI being unreachable.
+2. The controller creates the cert-manager `Certificate` for this root key in the GCPRootKey's namespace (see the
+   example below) and writes `spec.auth.wifX509.secretRef` (a patch that touches only this field). When cert-manager has
+   created the Secret, the controller sets `CertificateReady: True`. While the certificate is not issued, the status
+   shows a condition (for example `CertificateReady: False`) with the reason, such as the Platform Mesh PKI being
+   unreachable.
 3. The controller writes the CA data into the GCPRootKey status (`status.clientCertificate`). It has two values:
     - **CA certificate:** the CA. Google will accept only certificates issued by it.
     - **Subject CN:** the name on Krypton's certificates for this tenant. Only it is accepted.
@@ -652,7 +651,7 @@ gives no secret and does not choose this reference.
    registers the root key (see the last section).
 
 **Where the values are kept:** the customer provides nothing secret. The certificate and key are in the Secret that
-cert-manager creates in the controller's cluster; the CA data is in the GCPRootKey status; the key name, the
+cert-manager creates in the GCPRootKey's namespace; the CA data is in the GCPRootKey status; the key name, the
 provider path and the Secret reference are in the spec.
 
 **Example:**
@@ -674,7 +673,7 @@ spec:
       providerPath: //iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/kms/providers/acme
       secretRef:
         name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
-        namespace: openkcm-platform
+        namespace: default
 status:
   conditions:
   - type: CertificateReady
@@ -687,14 +686,14 @@ status:
     subjectCn: openkcm-3f2a9c1e
 ```
 
-The `Certificate` the controller creates for this root key, in the cluster where it runs:
+The `Certificate` the controller creates for this root key, next to the GCPRootKey:
 
 ```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
-  namespace: openkcm-platform
+  namespace: default
 spec:
   secretName: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
   commonName: openkcm-3f2a9c1e
@@ -723,8 +722,7 @@ spec:
 - Names, namespace, label key and lifetimes are illustrative; the platform chooses them.
 - `ca.crt` in the Secret and `caCertificatePem` in `status.clientCertificate` are the same CA certificate. The status
   copy lets the UI fill the Terraform file without reading the Secret that holds the private key.
-- When the GCPRootKey is deleted, a finalizer on it deletes the `Certificate` and the Secret first. An
-  ownerReference cannot span the kcp workspace and the controller's cluster.
+- Deleting the GCPRootKey: see Common rules (open).
 
 The Secret cert-manager creates from it:
 
@@ -733,7 +731,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: gcprootkey-9b4e2d71-6c3a-4e58-a0f2-1d7c8b3e5a96
-  namespace: openkcm-platform
+  namespace: default
   labels:
     openkcm.io/root-key-credentials: "true"
 type: kubernetes.io/tls
@@ -748,16 +746,16 @@ certificate and the client private key from the Secret (how the key reaches Kryp
 cert-manager renews the certificate, the controller sends the new one (see Secret changes). Registration,
 validation and activation then follow (see the last section).
 
-**Required from Platform Mesh:** the OpenBao PKI with a CA (per tenant or shared, open), cert-manager with an issuer
-for that PKI in the cluster where the controller runs, and a way to hand the private key to Krypton without plain
-text (open). Neither the PKI nor cert-manager is offered on Platform Mesh today. The customer gives no secret.
+**Required from Platform Mesh:** the OpenBao PKI with a CA (per tenant or shared, open), cert-manager for kcp workspaces
+with an issuer for that PKI, and a way to hand the private key to Krypton without plain text (open). Neither the PKI nor
+cert-manager is offered on Platform Mesh today. The customer gives no secret.
 
 **How Krypton authenticates (example):** it uses the certificate and private key that the controller sent, then
 follows steps 1 to 4 of "How it works".
 
 **Tenant isolation:** the provider trusts only the CA in its trust store and only this tenant's name, and the
-bindings name only that identity. Platform Mesh sets the name in the `Certificate`; the customer cannot choose it and
-cannot reach the `Certificate` or its Secret. Whether the CA is per tenant is open (see below).
+bindings name only that identity. Platform Mesh sets the name in the `Certificate`; the customer does not choose it,
+and the UI never shows the private key. Whether the CA is per tenant is open (see below).
 **Advantage:** no secret from the customer and no long-lived credential: the certificates are short-lived and
 renewed automatically. The customer enters only the provider path.
 **Downside:** depends on the PKI and cert-manager in Platform Mesh, and every renewal must reach Krypton through the
@@ -766,18 +764,16 @@ access to the key. The trust store holds up to three trust anchors, so old and n
 **Cut-off:** as in variant A.
 
 **Required for this method:**
-- The `Certificate` and its Secret live in the cluster where the controller runs, not in the customer's workspace, so
-  the customer never holds Krypton's private key. The controller then needs a client for its own cluster and the
-  right to manage `certificates` and `secrets` there.
-- `spec.auth.wifX509.secretRef` points at that Secret (name and namespace in the controller's cluster), and the
-  controller follows it to see every renewal. The controller writes the reference itself, once the Secret exists, with
-  a patch that touches only this field, so the UI's completion write is not overwritten. It accepts only the expected
-  name and namespace (derived from the UID) and sets
-  `CertificateReady: False` with the reason for any other value, so a customer cannot point it at another Secret
-  in the platform's cluster.
+- The `Certificate` and its Secret live in the customer's workspace, next to the GCPRootKey. The controller needs the
+  right to create `certificates` and to read and watch `secrets` there (APIExport permission claims).
+- `spec.auth.wifX509.secretRef` points at that Secret, and the controller follows it to see every renewal. The
+  controller writes the reference itself, when it creates the `Certificate`, with a patch that touches only this
+  field, so the UI's completion write is not overwritten. It accepts only the expected name and namespace (derived
+  from the UID) and sets `CertificateReady: False` with the reason for any other value, so a customer cannot point it
+  at another Secret.
 
 **Open (Platform Mesh side), to settle before this variant is built:**
-- Whether the cluster where the controller runs has cert-manager with a reachable issuer for the Platform Mesh PKI.
+- When cert-manager for kcp workspaces is available, with a reachable issuer for the Platform Mesh PKI.
 - Whether the controller may update the spec of the root key (not only its status) through the APIExport. It writes
   `secretRef` there.
 - One CA per tenant, or one shared CA with a subject CN per tenant. With a shared CA, tenant isolation rests on the

@@ -34,12 +34,12 @@ They explain each method and are examples only: that part is designed by the Kry
 - **Before any method:** OpenKCM is enabled and the tenant exists (step 0). The customer has a symmetric KMS key in
   their AWS account and knows its ARN and region.
 - **Tenant ID:** the ID Krypton returns from `CreateTenant`, stored in the Tenant annotation (step 0).
-- **Encryption context:** `openkcm:tenant=<tenant ID>`. It is not secret. For every method the
-  template allows `kms:Encrypt` and `kms:Decrypt` only with this context, and Krypton sends it on every KMS call.
-  The registration check depends on it (see the last section).
+- **Encryption context:** one entry, key `tenant`, value the tenant ID (`tenant=<tenant ID>`). It is not secret. For
+  every method the template allows `kms:Encrypt` and `kms:Decrypt` only with this context, and Krypton sends it on
+  every KMS call. The registration check depends on it (see the last section).
 - **Encryption context in the status:** for every method, when the draft AWSRootKey appears, the controller asks
-  Krypton for the encryption context and writes it into the AWSRootKey status (`status.encryptionContext`, the
-  tenant in `tenant`). It is reference information that comes from Krypton. The UI fills the template only from the
+  Krypton for the encryption context and writes it into the AWSRootKey status (`status.encryptionContext`, shown as
+  `tenant: <tenant ID>`). It is reference information that comes from Krypton. The UI fills the template only from the
   status and from what the customer typed in the form.
 - **Template values first:** the role in every template names the customer's key, so the UI asks for the KMS key
   ARN and region, and any other value the template needs, before it shows the template.
@@ -48,20 +48,19 @@ They explain each method and are examples only: that part is designed by the Kry
   in the namespace of the AWSRootKey, after the draft exists, and names it `awsrootkey-<UID>` (see the next rule). It
   labels it with `openkcm.io/root-key-credentials: "true"`. The AWSRootKey only references it (`secretRef` with `name`
   and `namespace`), which the UI sets when it completes the key. For the Platform Mesh PKI cert-manager creates the
-  Secret in the controller's cluster instead, under the same name (see 3. B), and the controller writes the reference.
+  Secret instead, in the same namespace and under the same name (see 3. B), and the controller writes the reference.
   No secret value is ever written into an AWSRootKey, its status, a log or an event. The entry names are fixed per
   method and listed in each section.
 - **Secret name and link:** every method names the Secret `awsrootkey-<UID>`, where UID is the `metadata.uid` of the
   AWSRootKey. The API server assigns it when the draft is created, so the UI reads it from the draft before it creates
-  the Secret. The UID is unique across all workspaces, so the name alone identifies the root key. The controller
-  accepts only that name (in the AWSRootKey's own namespace, or in the platform's namespace for the Platform Mesh
-  PKI); if `secretRef` says anything else, it reads no Secret and shows the reason in the status. So a Secret belongs to
-  exactly one AWSRootKey: two root keys never share one, a customer cannot point a root key at another Secret, and a
-  root key that is deleted and created again gets a new UID and so a new Secret. A rotation replaces the values in the
-  same Secret.
-- **Deleting the root key (open):** a Secret named after the UID has no use once the AWSRootKey is gone. For the
-  Platform Mesh PKI a finalizer deletes the Secret. For a Secret the UI created in the customer's workspace, it is not
-  decided who deletes it: the controller with a finalizer (it then needs the right to delete Secrets there) or the UI.
+  the Secret. The UID is unique across all workspaces, so the name alone identifies the root key. The controller accepts
+  only that name, in the AWSRootKey's own namespace; if `secretRef` says anything else, it reads no Secret and shows the
+  reason in the status. So a Secret belongs to exactly one AWSRootKey: two root keys never share one, a customer cannot
+  point a root key at another Secret, and a root key that is deleted and created again gets a new UID and so a new
+  Secret. A rotation replaces the values in the same Secret.
+- **Deleting the root key (open):** a Secret named after the UID has no use once the AWSRootKey is gone. It is not
+  decided who deletes it (and, for the Platform Mesh PKI, the `Certificate`): the controller with a finalizer (it then
+  needs the right to delete them) or the UI.
 - **Secret hand-off to Krypton (open):** the target is that nothing unencrypted is stored at Krypton or travels to it.
   The plan is that the controller encrypts the Secret with a public key taken from Krypton; that endpoint does not
   exist yet and is not agreed with the Krypton team. For now the value stays in the Kubernetes Secret as is, and how
@@ -88,7 +87,7 @@ They explain each method and are examples only: that part is designed by the Kry
 | Kubernetes Secret in the customer's kcp workspace | access key, IdPs, customer's certificate | yes |
 | Permission for the controller to read and watch those Secrets | access key, IdPs, customer's certificate | no |
 | Hand-off of that Secret to Krypton, not in plain text | every method | no |
-| OpenBao PKI with a CA, and cert-manager with an issuer for it, in the controller's cluster | Platform Mesh PKI | no |
+| OpenBao PKI with a CA, and cert-manager for kcp workspaces with an issuer for it | Platform Mesh PKI | no |
 
 The permission is an APIExport permission claim on `secrets`; the APIExport claims none today. The hand-off is
 described in Common rules. Whether the PKI has one CA per tenant or one shared CA is open.
@@ -604,17 +603,16 @@ deletes the role.
 **Who the CA is:** the Platform Mesh PKI (OpenBao). OpenKCM does not build or run a CA of its own. The customer
 does not provide the certificate: Platform Mesh generates it. The controller creates a cert-manager `Certificate`
 whose issuer is the Platform Mesh PKI, and cert-manager writes the short-lived certificate and its key into a Secret
-of type `kubernetes.io/tls`, renewing it before it expires. The `Certificate` and the Secret live in the cluster where
-the controller runs (a normal Kubernetes cluster, where cert-manager can run; a kcp workspace has no workloads), in a
-namespace owned by the platform. The customer never sees or touches them. The AWSRootKey points at the Secret with
-`secretRef` in the spec, as in 3. A, but the controller writes it, not the UI: the customer gives no secret, so the
-UI creates no Secret. The name is the same as in every other method, derived from the UID of the AWSRootKey
-(`awsrootkey-<UID>`), which the API server assigns when the draft is created and which is unique across all
-workspaces. The controller creates the `Certificate`
-and the Secret under that name and, when the Secret exists, writes the reference into the spec. The customer can edit
-the spec, so on every reconcile the controller accepts only the expected name and namespace; if the field says
-anything else, it reads no Secret and shows the reason in the status. This way the controller can watch the Secret
-and follow every renewal. Krypton cannot fetch a
+of type `kubernetes.io/tls`, renewing it before it expires. The `Certificate` and the Secret live in kcp, in the
+customer's workspace and in the namespace of the AWSRootKey, like every other Secret here: Platform Mesh runs
+cert-manager for kcp workspaces, and cert-manager writes the Secret next to the `Certificate`. The UI never shows the
+private key. The AWSRootKey points at the Secret with `secretRef` in the spec, as in 3. A, but the controller writes
+it, not the UI: the customer gives no secret, so the UI creates no Secret. The name is known upfront, the same as in
+every other method: `awsrootkey-<UID>`, derived from the UID that the API server assigns when the draft is created.
+The controller creates the `Certificate` with that Secret name and writes the reference into the spec in the same
+step. The customer can edit the spec, so on every reconcile the controller accepts only the expected name and
+namespace; if the field says anything else, it reads no Secret and shows the reason in the status. This way the
+controller can watch the Secret and follow every renewal. Krypton cannot fetch a
 certificate from Platform Mesh itself, so the controller reads the Secret and sends the certificate to Krypton. The
 customer puts the CA's public certificate into AWS.
 
@@ -630,17 +628,18 @@ customer puts the CA's public certificate into AWS.
 
 Not typed by the customer: `spec.tenantNameRef`, `spec.auth.method: RolesAnywhere` and
 `spec.auth.rolesAnywhere.certificateSource: PlatformMesh` (set by the UI with the draft), and
-`spec.auth.rolesAnywhere.secretRef` (set by the controller once cert-manager has created the Secret): the name and
-namespace of that Secret in the controller's cluster. The customer gives no secret and does not choose this reference.
+`spec.auth.rolesAnywhere.secretRef` (set by the controller when it creates the `Certificate`): the name and
+namespace of the Secret that cert-manager creates. The customer gives no secret and does not choose this reference.
 The CA certificate and the expected subject CN go into the template (the status shows them). Values 3 to 5 are saved
 together or not at all.
 
 **What the customer does:**
 1. In the UI, picks AWS KMS with Roles Anywhere (Platform Mesh PKI) and enters the KMS key ARN and region. Draft
    created.
-2. The controller creates the cert-manager `Certificate` for this root key (see the example below) and asks Krypton for
-   the encryption context. Repeating the call returns the same result. Meanwhile the platform issues the certificate,
-   with no customer action and no call from the controller:
+2. The controller creates the cert-manager `Certificate` for this root key in the AWSRootKey's namespace (see the
+   example below), writes `spec.auth.rolesAnywhere.secretRef` (a patch that touches only this field) and asks Krypton
+   for the encryption context. Repeating the call returns the same result. Meanwhile the platform issues the
+   certificate, with no customer action and no call from the controller:
     - cert-manager picks up the `Certificate` and asks the issuer named in `issuerRef` for a client certificate with
       the subject CN from the `Certificate`.
     - The issuer is backed by the Platform Mesh PKI (OpenBao), which signs with its CA and returns the certificate and
@@ -649,8 +648,8 @@ together or not at all.
       address or credential for it.
     - cert-manager writes the Secret (`tls.crt`, `tls.key`, `ca.crt`) with the label
       `openkcm.io/root-key-credentials: "true"`, and renews it before it expires (8 hours before, in the example below).
-    - When the Secret exists, the controller writes `spec.auth.rolesAnywhere.secretRef` (a patch that touches only this
-      field) and sets `CertificateReady: True`. While the certificate is not issued, the status shows
+    - When the Secret exists, the controller sets `CertificateReady: True`. While the certificate is not issued, the
+      status shows
       `CertificateReady: False` with the reason, such as the Platform Mesh PKI being unreachable (the reason can be
       taken from the `Certificate`'s own condition).
 3. The encryption context comes from Krypton. The CA certificate (PEM) comes from the generated Secret (`ca.crt`),
@@ -663,7 +662,7 @@ together or not at all.
    last section).
 
 **Where the values are kept:** the customer provides nothing secret. The certificate and key are in the Secret that
-cert-manager creates in the controller's cluster; the CA data in the status; key ARN, region, three ARNs and the
+cert-manager creates in the AWSRootKey's namespace; the CA data in the status; key ARN, region, three ARNs and the
 Secret reference in the spec.
 
 **Example:**
@@ -688,7 +687,7 @@ spec:
       roleArn: arn:aws:iam::123456789012:role/openkcm-l1-access
       secretRef:
         name: awsrootkey-7c1e9b52-4a3d-4f0b-8e21-5b6d9a0c3f47
-        namespace: openkcm-platform
+        namespace: default
 status:
   conditions:
   - type: CertificateReady
@@ -703,14 +702,14 @@ status:
     subjectCn: openkcm-3f2a9c1e
 ```
 
-The `Certificate` the controller creates for this root key, in the cluster where it runs:
+The `Certificate` the controller creates for this root key, next to the AWSRootKey:
 
 ```yaml
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: awsrootkey-7c1e9b52-4a3d-4f0b-8e21-5b6d9a0c3f47
-  namespace: openkcm-platform
+  namespace: default
 spec:
   secretName: awsrootkey-7c1e9b52-4a3d-4f0b-8e21-5b6d9a0c3f47
   commonName: openkcm-3f2a9c1e
@@ -739,8 +738,7 @@ spec:
   a changed Secret to its root key through the UID in the Secret name, so the label carries no root key identity.
 - The issuer is one per tenant if the CA is per tenant (open, see below).
 - Names, namespace, label key and lifetimes are illustrative; the platform chooses them.
-- When the AWSRootKey is deleted, a finalizer on it deletes the `Certificate` and the Secret first. An
-  ownerReference cannot span the kcp workspace and the controller's cluster.
+- Deleting the AWSRootKey: see Common rules (open).
 
 The Secret cert-manager creates from it:
 
@@ -749,7 +747,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: awsrootkey-7c1e9b52-4a3d-4f0b-8e21-5b6d9a0c3f47
-  namespace: openkcm-platform
+  namespace: default
   labels:
     openkcm.io/root-key-credentials: "true"
 type: kubernetes.io/tls
@@ -763,16 +761,16 @@ stringData:
 certificate and the client private key from the Secret (how the key reaches Krypton is open, see Common rules). When
 cert-manager renews the certificate, the controller sends the new one (see Secret changes).
 
-**Required from Platform Mesh:** the OpenBao PKI with a CA (per tenant or shared, open), cert-manager with an issuer
-for that PKI in the cluster where the controller runs, and a way to hand the private key to Krypton without plain
-text (open). Neither the PKI nor cert-manager is offered on Platform Mesh today. The customer gives no secret.
+**Required from Platform Mesh:** the OpenBao PKI with a CA (per tenant or shared, open), cert-manager for kcp workspaces
+with an issuer for that PKI, and a way to hand the private key to Krypton without plain text (open). Neither the PKI nor
+cert-manager is offered on Platform Mesh today. The customer gives no secret.
 
 **How Krypton authenticates (example):** it signs `CreateSession` with the private key it got from the controller,
 sending the certificate and the three ARNs, and Roles Anywhere and STS check it as in variant A.
 
 **Tenant isolation:** the role trusts only certificates with this tenant's subject CN and allows only this
-tenant's encryption context. Platform Mesh sets the CN in the `Certificate`; the customer cannot choose it and
-cannot reach the `Certificate` or its Secret.
+tenant's encryption context. Platform Mesh sets the CN in the `Certificate`; the customer does not choose it, and
+the UI never shows the private key.
 **Advantage:** no secret from the customer and no long-lived credential: the certificates are short-lived and
 renewed automatically. The customer enters only the three ARNs.
 **Downside:** depends on the PKI and cert-manager in Platform Mesh, and every renewal must reach Krypton through the
@@ -781,18 +779,16 @@ to the key. A trust anchor can hold two certificates, so old and new can overlap
 **Cut-off:** the customer disables the trust anchor or deletes the role.
 
 **Required for this method:**
-- The `Certificate` and its Secret live in the cluster where the controller runs, not in the customer's workspace, so
-  the customer never holds Krypton's private key. The controller then needs a client for its own cluster and the
-  right to manage `certificates` and `secrets` there.
-- `spec.auth.rolesAnywhere.secretRef` points at that Secret (name and namespace in the controller's cluster), and the
-  controller follows it to see every renewal. The controller writes the reference itself, once the Secret exists, with
-  a patch that touches only this field, so the UI's completion write is not overwritten. It accepts only the expected
-  name and namespace (derived from the UID) and sets
-  `CertificateReady: False` with the reason for any other value, so a customer cannot point it at another Secret
-  in the platform's cluster.
+- The `Certificate` and its Secret live in the customer's workspace, next to the AWSRootKey. The controller needs the
+  right to create `certificates` and to read and watch `secrets` there (APIExport permission claims).
+- `spec.auth.rolesAnywhere.secretRef` points at that Secret, and the controller follows it to see every renewal. The
+  controller writes the reference itself, when it creates the `Certificate`, with a patch that touches only this
+  field, so the UI's completion write is not overwritten. It accepts only the expected name and namespace (derived
+  from the UID) and sets `CertificateReady: False` with the reason for any other value, so a customer cannot point it
+  at another Secret.
 
 **Open (Platform Mesh side), to settle before this variant is built:**
-- Whether the cluster where the controller runs has cert-manager with a reachable issuer for the Platform Mesh PKI.
+- When cert-manager for kcp workspaces is available, with a reachable issuer for the Platform Mesh PKI.
 - Whether the controller may update the spec of the root key (not only its status) through the APIExport. It writes
   `secretRef` there.
 - One CA per tenant, or one shared CA with a subject CN per tenant. With a shared CA, tenant isolation rests on the

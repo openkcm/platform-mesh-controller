@@ -37,8 +37,10 @@ sequenceDiagram
     end
 
     opt only for the Platform Mesh PKI (Platform Mesh generates the certificate, the customer gives none)
-      Note over C: creates a cert-manager Certificate in its own cluster.<br/>cert-manager issues it into a Secret
-      C->>K: secretRef to that Secret in the spec, CertificateReady in the status
+      C->>K: creates a cert-manager Certificate next to the root key, secretRef to its Secret in the spec
+      Note over K: cert-manager issues the certificate into that Secret
+      K->>C: the controller sees the Secret
+      C->>K: CertificateReady in the status
     end
 
     K-->>UI: root key status (encryption context, CertificateReady)
@@ -120,8 +122,8 @@ hand-off `opt` block of the generic flow. How the secret reaches Krypton is not 
 
 For all of them except the Platform Mesh PKI, the credentials stay in a Kubernetes Secret in the customer's
 workspace. The UI creates it before it completes the root key, and the AWSRootKey only references it. For the
-Platform Mesh PKI, cert-manager creates the Secret in the controller's cluster, and the AWSRootKey references it in
-the spec.
+Platform Mesh PKI, cert-manager creates the Secret next to the AWSRootKey, and the AWSRootKey references it in the
+spec.
 
 ## How Krypton authenticates to AWS, per method (examples)
 
