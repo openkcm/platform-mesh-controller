@@ -45,6 +45,7 @@ var (
 	EnsureAutoDomainKeysForAccountRoot = ensureAutoDomainKeysForAccountRoot
 	EnsureDomainKey                    = (*AccountBootstrapReconciler).ensureDomainKey
 	EnsureTenant                       = (*AccountBootstrapReconciler).ensureTenant
+	EnsureL1KeyAccess                  = ensureL1KeyAccess
 	FindEarlierDomainKey               = (*DomainKeyReconciler).findEarlierDomainKey
 	InstanceDomainKeyTakenBy           = instanceDomainKeyTakenBy
 	IsOperationsAPIBinding             = isOperationsAPIBinding

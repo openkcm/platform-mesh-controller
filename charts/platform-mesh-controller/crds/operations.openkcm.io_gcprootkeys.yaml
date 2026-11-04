@@ -51,6 +51,11 @@ spec:
           spec:
             description: spec defines the desired state of GCPRootKey
             properties:
+              configured:
+                default: true
+                description: Configured is false for an empty provider slot. Legacy
+                  resources default to true.
+                type: boolean
               keyUri:
                 description: |-
                   KeyURI is the GCP KMS resource name
@@ -64,12 +69,21 @@ spec:
                 - Active
                 - Deactivated
                 type: string
+              resetRequest:
+                description: ResetRequest identifies an operator reset requested by
+                  the role holder.
+                maxLength: 128
+                type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
                 type: string
             required:
             - tenantNameRef
             type: object
+            x-kubernetes-validations:
+            - message: Configured slots require non-empty provider parameters
+              rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.keyUri)
+                && self.keyUri.size() > 0))'
           status:
             description: status defines the observed state of GCPRootKey
             properties:
@@ -160,6 +174,10 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              lastResetRequest:
+                description: LastResetRequest identifies the most recent completed
+                  reset.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation.
                 format: int64
@@ -228,6 +246,19 @@ spec:
                       completed without error.
                     type: boolean
                 type: object
+              registrationId:
+                description: RegistrationID identifies the durable backend registration
+                  and cancellation fence.
+                type: string
+              slotState:
+                description: SlotState is the state of the provider slot.
+                enum:
+                - Unconfigured
+                - Configuring
+                - Configured
+                - Resetting
+                - ResetFailed
+                type: string
             type: object
         required:
         - spec

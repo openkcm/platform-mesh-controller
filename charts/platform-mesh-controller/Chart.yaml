@@ -4,8 +4,7 @@ description: >-
   OpenKCM integration into Platform Mesh: the controller that reconciles the OpenKCM key
   resources of the kcp account workspaces, with the operations.openkcm.io CRDs.
 type: application
-# Version of the chart. Increment it for every change to the chart; 0.10.9 is published.
-version: 0.11.0
+version: 0.11.0 # x-release-please-version
 # Controller release this chart deploys; the image tag is image.tag in values.yaml. release-please
 # updates both lines (marker).
 appVersion: "0.0.3" # x-release-please-version

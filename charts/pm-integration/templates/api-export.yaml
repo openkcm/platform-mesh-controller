@@ -59,6 +59,11 @@ spec:
       schema: {{ printf "v%s-v1alpha1" (.Chart.Version | replace "." "-") }}.dataencryptionkeys.operations.openkcm.io
       storage:
         crd: {}
+    - group: operations.openkcm.io
+      name: l1keyaccesses
+      schema: {{ printf "v%s-v1alpha1" (.Chart.Version | replace "." "-") }}.l1keyaccesses.operations.openkcm.io
+      storage:
+        crd: {}
   permissionClaims:
     - group: ""
       resource: namespaces

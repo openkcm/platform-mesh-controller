@@ -35,6 +35,12 @@ type ServiceKeySpec struct {
 	// +required
 	DomainKeyRef string `json:"domainKeyRef"`
 
+	// DomainKeyNamespace is the namespace of the parent DomainKey. Empty means the
+	// namespace of the ServiceKey. Another namespace is allowed only for a System
+	// DomainKey in the account namespace.
+	// +optional
+	DomainKeyNamespace string `json:"domainKeyNamespace,omitempty"`
+
 	// Lifecycle is the user-desired key lifecycle. Defaults to Active.
 	// Setting to Deactivated cascades to all Data Encryption Keys under
 	// this Service Key.

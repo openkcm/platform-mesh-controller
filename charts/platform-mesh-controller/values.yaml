@@ -60,9 +60,8 @@ namespace: ""
 ###############################################################################
 
 image:
-  # -- Image repository, with the registry. Release images are published as
-  # `ghcr.io/openkcm/platform-mesh-controller/images/platform-mesh-controller`.
-  repository: ghcr.io/openkcm/platform-mesh-controller/images/platform-mesh-controller
+  # -- Image repository, with the registry.
+  repository: ghcr.io/openkcm/images/platform-mesh-controller
   # -- Image tag. Empty: the chart's appVersion. release-please updates it (marker).
   tag: v0.0.3 # x-release-please-version
   # -- Image digest, for example `sha256:0e07…`. With a tag, the image is `<tag>@<digest>`;
@@ -225,6 +224,24 @@ krypton:
   # plaintext: use it inside a service mesh with mutual TLS, to a root node without
   # `config.auth`. Empty: the mock API.
   grpcAddr: ""
+
+l1Authorization:
+  # -- Serve the L1 access webhook that the ValidatingWebhookConfiguration of the OpenKCM
+  # APIExport calls for root keys, L1 access markers and DomainKeys. It allows every review:
+  # there is no L1 Key Manager check yet.
+  enabled: false
+  # -- Container port of the webhook. It serves plain HTTP: TLS is terminated by the Ingress.
+  port: 9444
+  ingress:
+    # -- Publish the webhook at `https://<host>/validate-l1-access`, for a kcp outside the
+    # cluster.
+    enabled: false
+    className: traefik
+    # -- Host of the webhook URL. Required when the Ingress is enabled.
+    host: ""
+    # -- Secret with the TLS certificate of `host`. Required when the Ingress is enabled.
+    tlsSecretName: ""
+    annotations: {}
 
 ###############################################################################
 # 4. Kubernetes API access

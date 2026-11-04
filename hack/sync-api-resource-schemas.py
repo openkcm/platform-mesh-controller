@@ -33,6 +33,7 @@ KIND_ORDER = [
     "servicekeys",
     "dataencryptionkeys",
     "tenants",
+    "l1keyaccesses",
 ]
 
 # The double-curly Go template syntax must survive Python interpolation, so

@@ -76,6 +76,7 @@ const (
 // +kubebuilder:rbac:groups=core.kcp.io,resources=logicalclusters,verbs=get
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=l1keyaccesses,verbs=get;create
 
 // Reconcile fires when an account workspace creates/binds operations.openkcm.io.
 func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -142,6 +143,9 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	if err := r.ensureTenant(ctx, cl, namespace, accountName); err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := ensureL1KeyAccess(ctx, cl); err != nil {
+		return ctrl.Result{}, err
+	}
 	if err := r.ensureDomainKey(ctx, cl, namespace, accountName); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -152,6 +156,16 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	logger.Info("bootstrapped OpenKCM account defaults",
 		"tenant", accountName, "domainKey", accountName, "path", path)
 	return ctrl.Result{}, nil
+}
+
+func ensureL1KeyAccess(ctx context.Context, cl client.Client) error {
+	marker := &operationsv1alpha1.L1KeyAccess{}
+	err := cl.Get(ctx, types.NamespacedName{Name: operationsv1alpha1.L1KeyAccessName}, marker)
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	marker.Name = operationsv1alpha1.L1KeyAccessName
+	return client.IgnoreAlreadyExists(cl.Create(ctx, marker))
 }
 
 func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client.Client, namespace, accountName string) error {

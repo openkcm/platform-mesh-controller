@@ -1,6 +1,8 @@
 package operations_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
@@ -677,4 +680,47 @@ func TestEnsureTenantCopiesAudiences(t *testing.T) {
 	require.NotNil(t, tenant.Spec.OIDCProvider)
 	require.NotEmpty(t, tenant.Spec.OIDCProvider.Audiences)
 	assert.Equal(t, openkcmAudience, tenant.Spec.OIDCProvider.Audiences[0])
+}
+
+func TestEnsureL1KeyAccessCreatesTheAccountMarkerOnce(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	// when
+	require.NoError(t, operations.EnsureL1KeyAccess(ctx, cl))
+	require.NoError(t, operations.EnsureL1KeyAccess(ctx, cl))
+
+	// then
+	markers := &operationsv1alpha1.L1KeyAccessList{}
+	require.NoError(t, cl.List(ctx, markers))
+	require.Len(t, markers.Items, 1)
+	assert.Equal(t, operationsv1alpha1.L1KeyAccessName, markers.Items[0].Name)
+}
+
+func TestEnsureL1KeyAccessReturnsTheReadError(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	readErr := errors.New("kcp unavailable")
+	created := false
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return readErr
+		},
+		Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+			created = true
+			return nil
+		},
+	}).Build()
+
+	// when
+	err := operations.EnsureL1KeyAccess(ctx, cl)
+
+	// then
+	require.ErrorIs(t, err, readErr)
+	assert.False(t, created)
 }

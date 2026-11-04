@@ -24,7 +24,17 @@ import (
 
 // VaultRootKeySpec is a stub schema for HashiCorp Vault Transit. Full
 // provider wiring is a follow-up; no reconciler in v0.7.0.
+// +kubebuilder:validation:XValidation:rule="!self.configured || (self.tenantNameRef.size() > 0 && (has(self.serverAddress) && self.serverAddress.size() > 0) && (has(self.keyName) && self.keyName.size() > 0))",message="Configured slots require non-empty provider parameters"
 type VaultRootKeySpec struct {
+	// Configured is false for an empty provider slot. Legacy resources default to true.
+	// +optional
+	// +kubebuilder:default=true
+	Configured *bool `json:"configured,omitempty"`
+	// ResetRequest identifies an operator reset requested by the role holder.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ResetRequest string `json:"resetRequest,omitempty"`
+
 	// TenantNameRef is the account-name of the owning Tenant.
 	// +required
 	TenantNameRef string `json:"tenantNameRef"`
@@ -44,6 +54,18 @@ type VaultRootKeySpec struct {
 
 // VaultRootKeyStatus defines the observed state of VaultRootKey.
 type VaultRootKeyStatus struct {
+	// RegistrationID identifies the durable backend registration and cancellation fence.
+	// +optional
+	RegistrationID string `json:"registrationId,omitempty"`
+
+	// SlotState is the state of the provider slot.
+	// +optional
+	// +kubebuilder:validation:Enum=Unconfigured;Configuring;Configured;Resetting;ResetFailed
+	SlotState string `json:"slotState,omitempty"`
+	// LastResetRequest identifies the most recent completed reset.
+	// +optional
+	LastResetRequest string `json:"lastResetRequest,omitempty"`
+
 	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

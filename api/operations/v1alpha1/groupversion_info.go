@@ -50,6 +50,8 @@ var (
 				&DomainKey{}, &DomainKeyList{},
 				&ServiceKey{}, &ServiceKeyList{},
 				&DataEncryptionKey{}, &DataEncryptionKeyList{},
+
+				&L1KeyAccess{}, &L1KeyAccessList{},
 			)
 
 			metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
