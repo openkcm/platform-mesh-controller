@@ -71,6 +71,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # kcp does not end the initial events of a watch-list stream with a bookmark, so the
+            # informers would wait forever.
+            - name: KUBE_FEATURE_WatchListClient
+              value: "false"
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

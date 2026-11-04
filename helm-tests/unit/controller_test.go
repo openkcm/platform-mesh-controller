@@ -71,7 +71,8 @@ type deployment struct {
 }
 
 type envVar struct {
-	Name string `yaml:"name"`
+	Name  string `yaml:"name"`
+	Value string `yaml:"value"`
 }
 
 type probe struct {
@@ -464,4 +465,14 @@ func TestControllerL1Admission(t *testing.T) {
 			t.Errorf("want the missing host error, got %v", err)
 		}
 	})
+}
+
+func TestControllerListsAndWatchesOnKCP(t *testing.T) {
+	// when
+	env := controller(t).Spec.Template.Spec.Containers[0].Env
+
+	// then
+	if !slices.Contains(env, envVar{Name: "KUBE_FEATURE_WatchListClient", Value: "false"}) {
+		t.Errorf("the controller uses watch-list streams on kcp: %+v", env)
+	}
 }
