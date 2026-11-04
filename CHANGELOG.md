@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.1 (2026-11-04)
+
+## What's Changed
+* ci: use the shared release workflows of openkcm/build by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/50
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.12.0...v0.12.1
+
 ## 0.12.0 (2026-11-04)
 
 ## What's Changed
