@@ -58,6 +58,9 @@ spec:
             {{- with .Values.krypton.grpcAddr }}
             - --krypton-grpc-addr={{ . }}
             {{- end }}
+            {{- if .Values.l1Authorization.enabled }}
+            - --l1-admission-bind-address=:{{ .Values.l1Authorization.port }}
+            {{- end }}
             - --health-probe-bind-address=:8081
             - --metrics-bind-address=:8080
             {{- with .Values.extraArgs }}
@@ -78,6 +81,11 @@ spec:
             - containerPort: 8080
               name: metrics
               protocol: TCP
+            {{- if .Values.l1Authorization.enabled }}
+            - containerPort: {{ .Values.l1Authorization.port }}
+              name: l1-admission
+              protocol: TCP
+            {{- end }}
           {{- if .Values.livenessProbe.enabled }}
           livenessProbe:
             httpGet:

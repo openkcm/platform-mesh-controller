@@ -1,0 +1,52 @@
+{{- if .Values.l1Authorization.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: openkcm-l1-admission
+  namespace: {{ include "platform-mesh-controller.namespace" . }}
+  labels:
+    {{- include "platform-mesh-controller.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: admission
+      port: 80
+      protocol: TCP
+      targetPort: l1-admission
+  selector:
+    {{- include "platform-mesh-controller.selectorLabels" . | nindent 4 }}
+{{- with .Values.l1Authorization.ingress }}
+{{- if .enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: openkcm-l1-admission
+  namespace: {{ include "platform-mesh-controller.namespace" $ }}
+  labels:
+    {{- include "platform-mesh-controller.labels" $ | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  tls:
+    - hosts:
+        - {{ required "l1Authorization.ingress.host is required" .host | quote }}
+      secretName: {{ required "l1Authorization.ingress.tlsSecretName is required" .tlsSecretName | quote }}
+  rules:
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /validate-l1-access
+            pathType: Exact
+            backend:
+              service:
+                name: openkcm-l1-admission
+                port:
+                  name: admission
+{{- end }}
+{{- end }}
+{{- end }}

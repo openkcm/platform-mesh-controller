@@ -19,6 +19,10 @@ spec:
           protocol: TCP
         - port: health
           protocol: TCP
+        {{- if .Values.l1Authorization.enabled }}
+        - port: l1-admission
+          protocol: TCP
+        {{- end }}
     {{- with .Values.networkPolicy.ingress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

@@ -18,6 +18,11 @@ const (
 	// kryptonAddr sets the address of Krypton; openKCMURL a real OpenKCM API.
 	kryptonAddr = "krypton.grpcAddr=krypton-root.services.svc:8080"
 	openKCMURL  = "openkcmAPI.url=https://openkcm.example.org"
+
+	l1Admission     = "l1Authorization.enabled=true"
+	l1Ingress       = "l1Authorization.ingress.enabled=true"
+	l1IngressHost   = "l1Authorization.ingress.host=openkcm-l1-admission.example.org"
+	l1IngressSecret = "l1Authorization.ingress.tlsSecretName=openkcm-l1-admission-tls"
 )
 
 // deployment is the part of the controller's Deployment that the tests check.
@@ -167,6 +172,7 @@ func TestControllerFlags(t *testing.T) {
 	for name, args := range map[string][]string{
 		"defaults":          nil,
 		"Krypton":           set(kryptonAddr),
+		"L1 admission":      set(l1Admission),
 		"extraArgs example": {"-f", writeValues(t, extraArgs)},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -392,4 +398,70 @@ func TestControllerReleaseNotes(t *testing.T) {
 			}
 		})
 	}
+}
+
+type l1AdmissionIngress struct {
+	Spec struct {
+		TLS []struct {
+			Hosts      []string `yaml:"hosts"`
+			SecretName string   `yaml:"secretName"`
+		} `yaml:"tls"`
+		Rules []struct {
+			Host string `yaml:"host"`
+			HTTP struct {
+				Paths []struct {
+					Path    string `yaml:"path"`
+					Backend struct {
+						Service struct {
+							Name string `yaml:"name"`
+						} `yaml:"service"`
+					} `yaml:"backend"`
+				} `yaml:"paths"`
+			} `yaml:"http"`
+		} `yaml:"rules"`
+	} `yaml:"spec"`
+}
+
+func TestControllerL1Admission(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		// when
+		out := render(t, controllerChart)
+
+		// then
+		if strings.Contains(out, "l1-admission") {
+			t.Error("the default values render the L1 access webhook")
+		}
+	})
+
+	t.Run("published through the Ingress", func(t *testing.T) {
+		// when
+		out := render(t, controllerChart, set(l1Admission, l1Ingress, l1IngressHost, l1IngressSecret)...)
+
+		// then
+		args := object[deployment](t, out, "Deployment").Spec.Template.Spec.Containers[0].Args
+		if !slices.Contains(args, "--l1-admission-bind-address=:9444") {
+			t.Errorf("the controller does not serve the webhook: %v", args)
+		}
+		ingress := object[l1AdmissionIngress](t, out, "Ingress")
+		if len(ingress.Spec.TLS) != 1 || ingress.Spec.TLS[0].SecretName != "openkcm-l1-admission-tls" ||
+			len(ingress.Spec.Rules) != 1 || ingress.Spec.Rules[0].Host != "openkcm-l1-admission.example.org" {
+			t.Fatalf("ingress %+v", ingress.Spec)
+		}
+		path := ingress.Spec.Rules[0].HTTP.Paths[0]
+		service := "openkcm-l1-admission"
+		if path.Path != "/validate-l1-access" || path.Backend.Service.Name != service {
+			t.Errorf("ingress path %+v", path)
+		}
+	})
+
+	t.Run("Ingress without host", func(t *testing.T) {
+		// when
+		_, err := runHelm(t, append([]string{"template", releaseName, controllerChart},
+			set(l1Admission, l1Ingress, l1IngressSecret)...)...)
+
+		// then
+		if err == nil || !strings.Contains(err.Error(), "l1Authorization.ingress.host is required") {
+			t.Errorf("want the missing host error, got %v", err)
+		}
+	})
 }

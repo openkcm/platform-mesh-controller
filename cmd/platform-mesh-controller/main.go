@@ -47,6 +47,7 @@ import (
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 	operationscontroller "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
 	"github.com/openkcm/platform-mesh-controller/internal/kryptongrpc"
+	"github.com/openkcm/platform-mesh-controller/internal/l1admission"
 	"github.com/openkcm/platform-mesh-controller/internal/mockapi"
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
@@ -69,6 +70,7 @@ func main() {
 	var kcpKubeconfig string
 	var operationsEndpointSlice string
 	var mockAPIAddr string
+	var l1AdmissionAddr string
 	var openkcmAPIURL string
 	var kryptonAddr string
 	var metricsAddr string
@@ -91,6 +93,11 @@ func main() {
 		"Operations APIExportEndpointSlice name",
 	)
 	flag.StringVar(&mockAPIAddr, "mock-api-addr", ":9090", "Mock API server listen address")
+	flag.StringVar(&l1AdmissionAddr,
+		"l1-admission-bind-address",
+		"",
+		"Listen address of the L1 access webhook at "+l1admission.Path+". Empty: not served.",
+	)
 	flag.StringVar(&openkcmAPIURL, "openkcm-api-url", "http://localhost:9090", "OpenKCM API base URL")
 	flag.StringVar(&kryptonAddr,
 		"krypton-grpc-addr",
@@ -185,6 +192,15 @@ func main() {
 			setupLog.Error(err, "Mock API server failed")
 		}
 	}()
+
+	if l1AdmissionAddr != "" {
+		go func() {
+			setupLog.Info("Starting L1 access webhook", "addr", l1AdmissionAddr)
+			if err := l1admission.Start(ctx, l1AdmissionAddr); err != nil {
+				setupLog.Error(err, "L1 access webhook failed")
+			}
+		}()
+	}
 
 	apiClient := openkcmapi.NewClient(openkcmAPIURL)
 
