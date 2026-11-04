@@ -10,5 +10,8 @@ permissions:
 jobs:
   release:
     uses: openkcm/build/.github/workflows/release.manual.yaml@main
+    with:
+      # Empty: release-please reads release-please-config.json instead of the shared default "go".
+      release-type: ""
     secrets: inherit
 
