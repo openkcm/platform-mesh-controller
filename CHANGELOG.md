@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0 (2026-11-04)
+
+## What's Changed
+* fix: replaced all keyword openkcm-controller to platform mesh controller by @nnicora in https://github.com/openkcm/platform-mesh-controller/pull/37
+* Bump google.golang.org/grpc from 1.83.0 to 1.84.0 by @dependabot[bot] in https://github.com/openkcm/platform-mesh-controller/pull/32
+* Bump github.com/onsi/ginkgo/v2 from 2.27.2 to 2.33.0 by @dependabot[bot] in https://github.com/openkcm/platform-mesh-controller/pull/30
+* fix: update the dependabot by @nnicora in https://github.com/openkcm/platform-mesh-controller/pull/38
+* fix(deps): bump k8s.io/apimachinery from 0.35.0 to 0.37.1 by @dependabot[bot] in https://github.com/openkcm/platform-mesh-controller/pull/31
+* fix(deps): bump the gomod-group group with 7 updates by @dependabot[bot] in https://github.com/openkcm/platform-mesh-controller/pull/39
+* fix: chart improvements by @nnicora in https://github.com/openkcm/platform-mesh-controller/pull/40
+* fix: go mod tidy by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/44
+* feat: add the showroom 0.17.6 UI contract and the release pipeline by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/46
+* chore: start release-please from the last real release by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/47
+
+## New Contributors
+* @dependabot[bot] made their first contribution in https://github.com/openkcm/platform-mesh-controller/pull/32
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.0.3...v0.12.0
+
 ## [0.0.3](https://github.com/openkcm/platform-mesh-controller/compare/v0.0.2...v0.0.3) (2026-10-06)
 
 
