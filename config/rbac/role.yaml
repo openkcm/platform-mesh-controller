@@ -71,3 +71,10 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - operations.openkcm.io
+  resources:
+  - l1keyaccesses
+  verbs:
+  - create
+  - get

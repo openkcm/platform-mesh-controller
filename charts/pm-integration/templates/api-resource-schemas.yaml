@@ -2714,3 +2714,53 @@ spec:
     storage: true
     subresources:
       status: {}
+---
+apiVersion: apis.kcp.io/v1alpha1
+kind: APIResourceSchema
+metadata:
+  name: '{{ printf "v%s-v1alpha1" (.Chart.Version | replace "." "-") }}.l1keyaccesses.operations.openkcm.io'
+spec:
+  group: operations.openkcm.io
+  names:
+    kind: L1KeyAccess
+    listKind: L1KeyAccessList
+    plural: l1keyaccesses
+    shortNames:
+    - l1ka
+    singular: l1keyaccess
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      description: 'L1KeyAccess is the IAM assignment target for all L1 keys in an account.
+
+        The provider owns its lifecycle. Role assignments live in Platform Mesh IAM.'
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation of an object.
+
+            Servers should convert recognized schemas to the latest internal value, and
+
+            may reject unrecognized values.
+
+            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this object represents.
+
+            Servers may infer this from the endpoint the client submits requests to.
+
+            Cannot be updated.
+
+            In CamelCase.
+
+            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+      type: object
+      x-kubernetes-validations:
+      - message: The account marker must be named account-l1
+        rule: self.metadata.name == 'account-l1'
+    served: true
+    storage: true
