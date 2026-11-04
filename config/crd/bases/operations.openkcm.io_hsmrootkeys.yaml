@@ -50,6 +50,11 @@ spec:
           spec:
             description: spec defines the desired state of HSMRootKey
             properties:
+              configured:
+                default: true
+                description: Configured is false for an empty provider slot. Legacy
+                  resources default to true.
+                type: boolean
               lifecycle:
                 default: Active
                 description: Lifecycle is the user-desired key lifecycle. Defaults
@@ -57,6 +62,11 @@ spec:
                 enum:
                 - Active
                 - Deactivated
+                type: string
+              resetRequest:
+                description: ResetRequest identifies an operator reset requested by
+                  the role holder.
+                maxLength: 128
                 type: string
               slotUri:
                 description: SlotURI is the PKCS#11 URI identifying the HSM slot +
@@ -68,6 +78,10 @@ spec:
             required:
             - tenantNameRef
             type: object
+            x-kubernetes-validations:
+            - message: Configured slots require non-empty provider parameters
+              rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.slotUri)
+                && self.slotUri.size() > 0))'
           status:
             description: status defines the observed state of HSMRootKey
             properties:
@@ -158,6 +172,10 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              lastResetRequest:
+                description: LastResetRequest identifies the most recent completed
+                  reset.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation.
                 format: int64
@@ -226,6 +244,19 @@ spec:
                       completed without error.
                     type: boolean
                 type: object
+              registrationId:
+                description: RegistrationID identifies the durable backend registration
+                  and cancellation fence.
+                type: string
+              slotState:
+                description: SlotState is the state of the provider slot.
+                enum:
+                - Unconfigured
+                - Configuring
+                - Configured
+                - Resetting
+                - ResetFailed
+                type: string
             type: object
         required:
         - spec

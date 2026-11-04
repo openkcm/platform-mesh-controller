@@ -128,14 +128,20 @@ func rootKeyRefMatches(dk *operationsv1alpha1.DomainKey, kind, namespace, name s
 }
 
 // cascadeDeactivateDomainKey patches spec.lifecycle=Deactivated on every
-// ServiceKey in the same namespace that points at this DomainKey.
+// ServiceKey that points at this DomainKey. A System DomainKey can have
+// ServiceKeys in other namespaces, so all namespaces are listed.
 func cascadeDeactivateDomainKey(ctx context.Context, cl client.Client, namespace, domainKeyName string) error {
 	sks := &operationsv1alpha1.ServiceKeyList{}
-	if err := cl.List(ctx, sks, client.InNamespace(namespace)); err != nil {
+	if err := cl.List(ctx, sks); err != nil {
 		return err
 	}
 	return deactivateChildren(ctx, cl, pointersTo(sks.Items), domainKeyName,
-		func(sk *operationsv1alpha1.ServiceKey) string { return sk.Spec.DomainKeyRef },
+		func(sk *operationsv1alpha1.ServiceKey) string {
+			if domainKeyNamespaceOf(sk) != namespace {
+				return ""
+			}
+			return sk.Spec.DomainKeyRef
+		},
 		func(sk *operationsv1alpha1.ServiceKey) *shared.DesiredLifecycle { return &sk.Spec.Lifecycle },
 	)
 }

@@ -50,8 +50,6 @@ publicHost: "localhost"
 metadata:
   # -- Path of the content file for the account workspace (navigation and pages of OpenKCM).
   contentPath: "/pm-content.json"
-  # -- Path of the content file for the namespaces of an account workspace.
-  namespaceContentPath: "/pm-content-namespace.json"
 
 branding:
   marketplace:

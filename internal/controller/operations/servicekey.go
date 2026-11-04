@@ -94,16 +94,28 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{}, err
 	}
 
-	// Resolve the parent DomainKey by name (sibling in the same workspace).
+	// Resolve the parent DomainKey by name, in the ServiceKey's namespace or, for a
+	// System DomainKey, in the account namespace.
 	// Fetched up-front because the child≤parent invariant clamps the
 	// effective desired lifecycle by the parent's actual state.
+	dkNamespace := domainKeyNamespaceOf(sk)
+	if dkNamespace != sk.Namespace && dkNamespace != defaultAccountNamespace(r.AccountNamespace) {
+		r.setFailedCondition(ctx, cl, sk, "DomainKeyNamespaceNotAllowed",
+			fmt.Sprintf("DomainKey namespace %q is neither the ServiceKey's nor the account namespace", dkNamespace))
+		return ctrl.Result{}, nil
+	}
 	dk := &operationsv1alpha1.DomainKey{}
-	dkName := types.NamespacedName{Namespace: req.Namespace, Name: sk.Spec.DomainKeyRef}
+	dkName := types.NamespacedName{Namespace: dkNamespace, Name: sk.Spec.DomainKeyRef}
 	if err := cl.Get(ctx, dkName, dk); err != nil {
 		logger.Info("Referenced DomainKey not found, will retry", "domainKey", sk.Spec.DomainKeyRef)
 		r.setFailedCondition(ctx, cl, sk, "DomainKeyNotFound",
 			fmt.Sprintf("Referenced DomainKey %q not found: %v", sk.Spec.DomainKeyRef, err))
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+	if dkNamespace != sk.Namespace && dk.Spec.Scope != operationsv1alpha1.DomainKeyScopeSystem {
+		r.setFailedCondition(ctx, cl, sk, "DomainKeyNotShared",
+			fmt.Sprintf("DomainKey %q in namespace %q is not a System DomainKey", dk.Name, dkNamespace))
+		return ctrl.Result{}, nil
 	}
 	domainKeyState := shared.LifecycleState("")
 	if dk.Status.CryptoState != nil {
@@ -279,6 +291,13 @@ func serviceKeyOpenKCMName(sk *operationsv1alpha1.ServiceKey) string {
 	return serviceKeyNamePrefix + sk.Namespace + "." + sk.Name
 }
 
+func domainKeyNamespaceOf(sk *operationsv1alpha1.ServiceKey) string {
+	if sk.Spec.DomainKeyNamespace != "" {
+		return sk.Spec.DomainKeyNamespace
+	}
+	return sk.Namespace
+}
+
 func instanceDomainKeyTakenBy(
 	ctx context.Context,
 	cl client.Client,
@@ -295,7 +314,8 @@ func instanceDomainKeyTakenBy(
 	holder := sk
 	for i := range sks.Items {
 		other := &sks.Items[i]
-		if other.Spec.DomainKeyRef == dk.Name && other.DeletionTimestamp.IsZero() && servesBefore(other, holder) {
+		if other.Spec.DomainKeyRef == dk.Name && domainKeyNamespaceOf(other) == dk.Namespace &&
+			other.DeletionTimestamp.IsZero() && servesBefore(other, holder) {
 			holder = other
 		}
 	}

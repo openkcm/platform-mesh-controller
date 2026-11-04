@@ -55,6 +55,12 @@ spec:
           spec:
             description: spec defines the desired state of ServiceKey
             properties:
+              domainKeyNamespace:
+                description: |-
+                  DomainKeyNamespace is the namespace of the parent DomainKey. Empty means the
+                  namespace of the ServiceKey. Another namespace is allowed only for a System
+                  DomainKey in the account namespace.
+                type: string
               domainKeyRef:
                 description: DomainKeyRef is the name of the parent DomainKey in the
                   same workspace.

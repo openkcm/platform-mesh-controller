@@ -63,6 +63,10 @@ spec:
         spec:
           description: spec defines the desired state of AWSRootKey
           properties:
+            configured:
+              default: true
+              description: Configured is false for an empty provider slot. Legacy resources default to true.
+              type: boolean
             endpointUrl:
               description: EndpointURL optionally pins the AWS KMS endpoint (e.g. for VPC endpoints).
               type: string
@@ -84,6 +88,10 @@ spec:
               type: string
             region:
               description: Region is the AWS region hosting the KMS key.
+              type: string
+            resetRequest:
+              description: ResetRequest identifies an operator reset requested by the role holder.
+              maxLength: 128
               type: string
             rolesAnywhere:
               description: RolesAnywhere is the Roles Anywhere federation configuration.
@@ -110,11 +118,11 @@ spec:
                 tenant identity from the workspace path (showroom#203).'
               type: string
           required:
-          - keyUri
-          - region
-          - rolesAnywhere
           - tenantNameRef
           type: object
+          x-kubernetes-validations:
+          - message: Configured slots require non-empty provider parameters
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region) && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.trustAnchorArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.profileArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.roleArn.size() > 0))'
         status:
           description: status defines the observed state of AWSRootKey
           properties:
@@ -206,6 +214,9 @@ spec:
                   format: int32
                   type: integer
               type: object
+            lastResetRequest:
+              description: LastResetRequest identifies the most recent completed reset.
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64
@@ -271,6 +282,18 @@ spec:
                   description: Success is true when the last reconciliation cycle completed without error.
                   type: boolean
               type: object
+            registrationId:
+              description: RegistrationID identifies the durable backend registration and cancellation fence.
+              type: string
+            slotState:
+              description: SlotState is the state of the provider slot.
+              enum:
+              - Unconfigured
+              - Configuring
+              - Configured
+              - Resetting
+              - ResetFailed
+              type: string
           type: object
       required:
       - spec
@@ -340,6 +363,10 @@ spec:
         spec:
           description: spec defines the desired state of AzureRootKey
           properties:
+            configured:
+              default: true
+              description: Configured is false for an empty provider slot. Legacy resources default to true.
+              type: boolean
             federatedIdentity:
               description: FederatedIdentity is the Azure AD workload-identity federation config.
               properties:
@@ -366,6 +393,10 @@ spec:
               - Active
               - Deactivated
               type: string
+            resetRequest:
+              description: ResetRequest identifies an operator reset requested by the role holder.
+              maxLength: 128
+              type: string
             tenantNameRef:
               description: TenantNameRef is the account-name of the owning Tenant.
               type: string
@@ -373,11 +404,11 @@ spec:
               description: VaultURL is the Azure Key Vault endpoint.
               type: string
           required:
-          - federatedIdentity
-          - keyName
           - tenantNameRef
-          - vaultUrl
           type: object
+          x-kubernetes-validations:
+          - message: Configured slots require non-empty provider parameters
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.vaultUrl) && self.vaultUrl.size() > 0) && (has(self.keyName) && self.keyName.size() > 0) && (has(self.federatedIdentity) && self.federatedIdentity.tenantId.size() > 0) && (has(self.federatedIdentity) && self.federatedIdentity.clientId.size() > 0))'
         status:
           description: status defines the observed state of AzureRootKey
           properties:
@@ -469,6 +500,9 @@ spec:
                   format: int32
                   type: integer
               type: object
+            lastResetRequest:
+              description: LastResetRequest identifies the most recent completed reset.
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64
@@ -534,6 +568,18 @@ spec:
                   description: Success is true when the last reconciliation cycle completed without error.
                   type: boolean
               type: object
+            registrationId:
+              description: RegistrationID identifies the durable backend registration and cancellation fence.
+              type: string
+            slotState:
+              description: SlotState is the state of the provider slot.
+              enum:
+              - Unconfigured
+              - Configuring
+              - Configured
+              - Resetting
+              - ResetFailed
+              type: string
           type: object
       required:
       - spec
@@ -616,6 +662,10 @@ spec:
               - authMountPath
               - roleName
               type: object
+            configured:
+              default: true
+              description: Configured is false for an empty provider slot. Legacy resources default to true.
+              type: boolean
             enginePath:
               description: EnginePath is the OpenBao Transit engine mount path (e.g. "transit").
               type: string
@@ -629,6 +679,10 @@ spec:
               - Active
               - Deactivated
               type: string
+            resetRequest:
+              description: ResetRequest identifies an operator reset requested by the role holder.
+              maxLength: 128
+              type: string
             serverAddress:
               description: ServerAddress is the OpenBao API endpoint.
               type: string
@@ -636,12 +690,11 @@ spec:
               description: TenantNameRef is the account-name of the owning Tenant.
               type: string
           required:
-          - certAuth
-          - enginePath
-          - keyName
-          - serverAddress
           - tenantNameRef
           type: object
+          x-kubernetes-validations:
+          - message: Configured slots require non-empty provider parameters
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.enginePath) && self.enginePath.size() > 0) && (has(self.keyName) && self.keyName.size() > 0) && (has(self.serverAddress) && self.serverAddress.size() > 0) && (has(self.certAuth) && self.certAuth.authMountPath.size() > 0) && (has(self.certAuth) && self.certAuth.roleName.size() > 0))'
         status:
           description: status defines the observed state of OpenBaoRootKey
           properties:
@@ -733,6 +786,9 @@ spec:
                   format: int32
                   type: integer
               type: object
+            lastResetRequest:
+              description: LastResetRequest identifies the most recent completed reset.
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64
@@ -798,6 +854,18 @@ spec:
                   description: Success is true when the last reconciliation cycle completed without error.
                   type: boolean
               type: object
+            registrationId:
+              description: RegistrationID identifies the durable backend registration and cancellation fence.
+              type: string
+            slotState:
+              description: SlotState is the state of the provider slot.
+              enum:
+              - Unconfigured
+              - Configuring
+              - Configured
+              - Resetting
+              - ResetFailed
+              type: string
           type: object
       required:
       - spec
@@ -859,6 +927,10 @@ spec:
         spec:
           description: spec defines the desired state of GCPRootKey
           properties:
+            configured:
+              default: true
+              description: Configured is false for an empty provider slot. Legacy resources default to true.
+              type: boolean
             keyUri:
               description: 'KeyURI is the GCP KMS resource name
 
@@ -871,12 +943,19 @@ spec:
               - Active
               - Deactivated
               type: string
+            resetRequest:
+              description: ResetRequest identifies an operator reset requested by the role holder.
+              maxLength: 128
+              type: string
             tenantNameRef:
               description: TenantNameRef is the account-name of the owning Tenant.
               type: string
           required:
           - tenantNameRef
           type: object
+          x-kubernetes-validations:
+          - message: Configured slots require non-empty provider parameters
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.keyUri) && self.keyUri.size() > 0))'
         status:
           description: status defines the observed state of GCPRootKey
           properties:
@@ -968,6 +1047,9 @@ spec:
                   format: int32
                   type: integer
               type: object
+            lastResetRequest:
+              description: LastResetRequest identifies the most recent completed reset.
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64
@@ -1033,6 +1115,18 @@ spec:
                   description: Success is true when the last reconciliation cycle completed without error.
                   type: boolean
               type: object
+            registrationId:
+              description: RegistrationID identifies the durable backend registration and cancellation fence.
+              type: string
+            slotState:
+              description: SlotState is the state of the provider slot.
+              enum:
+              - Unconfigured
+              - Configuring
+              - Configured
+              - Resetting
+              - ResetFailed
+              type: string
           type: object
       required:
       - spec
@@ -1096,6 +1190,10 @@ spec:
         spec:
           description: spec defines the desired state of VaultRootKey
           properties:
+            configured:
+              default: true
+              description: Configured is false for an empty provider slot. Legacy resources default to true.
+              type: boolean
             keyName:
               description: KeyName is the Vault Transit key name.
               type: string
@@ -1106,6 +1204,10 @@ spec:
               - Active
               - Deactivated
               type: string
+            resetRequest:
+              description: ResetRequest identifies an operator reset requested by the role holder.
+              maxLength: 128
+              type: string
             serverAddress:
               description: ServerAddress is the Vault API endpoint.
               type: string
@@ -1115,6 +1217,9 @@ spec:
           required:
           - tenantNameRef
           type: object
+          x-kubernetes-validations:
+          - message: Configured slots require non-empty provider parameters
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.serverAddress) && self.serverAddress.size() > 0) && (has(self.keyName) && self.keyName.size() > 0))'
         status:
           description: status defines the observed state of VaultRootKey
           properties:
@@ -1206,6 +1311,9 @@ spec:
                   format: int32
                   type: integer
               type: object
+            lastResetRequest:
+              description: LastResetRequest identifies the most recent completed reset.
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64
@@ -1271,6 +1379,18 @@ spec:
                   description: Success is true when the last reconciliation cycle completed without error.
                   type: boolean
               type: object
+            registrationId:
+              description: RegistrationID identifies the durable backend registration and cancellation fence.
+              type: string
+            slotState:
+              description: SlotState is the state of the provider slot.
+              enum:
+              - Unconfigured
+              - Configuring
+              - Configured
+              - Resetting
+              - ResetFailed
+              type: string
           type: object
       required:
       - spec
@@ -1332,12 +1452,20 @@ spec:
         spec:
           description: spec defines the desired state of HSMRootKey
           properties:
+            configured:
+              default: true
+              description: Configured is false for an empty provider slot. Legacy resources default to true.
+              type: boolean
             lifecycle:
               default: Active
               description: Lifecycle is the user-desired key lifecycle. Defaults to Active.
               enum:
               - Active
               - Deactivated
+              type: string
+            resetRequest:
+              description: ResetRequest identifies an operator reset requested by the role holder.
+              maxLength: 128
               type: string
             slotUri:
               description: SlotURI is the PKCS#11 URI identifying the HSM slot + token + key.
@@ -1348,6 +1476,9 @@ spec:
           required:
           - tenantNameRef
           type: object
+          x-kubernetes-validations:
+          - message: Configured slots require non-empty provider parameters
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.slotUri) && self.slotUri.size() > 0))'
         status:
           description: status defines the observed state of HSMRootKey
           properties:
@@ -1439,6 +1570,9 @@ spec:
                   format: int32
                   type: integer
               type: object
+            lastResetRequest:
+              description: LastResetRequest identifies the most recent completed reset.
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64
@@ -1504,6 +1638,18 @@ spec:
                   description: Success is true when the last reconciliation cycle completed without error.
                   type: boolean
               type: object
+            registrationId:
+              description: RegistrationID identifies the durable backend registration and cancellation fence.
+              type: string
+            slotState:
+              description: SlotState is the state of the provider slot.
+              enum:
+              - Unconfigured
+              - Configuring
+              - Configured
+              - Resetting
+              - ResetFailed
+              type: string
           type: object
       required:
       - spec
@@ -1905,6 +2051,13 @@ spec:
         spec:
           description: spec defines the desired state of ServiceKey
           properties:
+            domainKeyNamespace:
+              description: 'DomainKeyNamespace is the namespace of the parent DomainKey. Empty means the
+
+                namespace of the ServiceKey. Another namespace is allowed only for a System
+
+                DomainKey in the account namespace.'
+              type: string
             domainKeyRef:
               description: DomainKeyRef is the name of the parent DomainKey in the same workspace.
               type: string

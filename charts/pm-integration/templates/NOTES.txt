@@ -4,7 +4,6 @@ pm-integration {{ .Chart.Version }} (controller {{ .Chart.AppVersion }}) is inst
 APIExport          : operations.openkcm.io
 APIResourceSchemas : v{{ .Chart.Version | replace "." "-" }}-v1alpha1.<resource>.operations.openkcm.io
 Content URL        : {{ $baseUrl }}{{ .Values.metadata.contentPath }}
-Namespace URL      : {{ $baseUrl }}{{ .Values.metadata.namespaceContentPath }}
 
 The Platform Mesh marketplace finds this provider by the ProviderMetadata operations.openkcm.io.
 Check the export and its schemas:

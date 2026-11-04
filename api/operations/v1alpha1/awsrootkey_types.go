@@ -37,7 +37,17 @@ type AWSRolesAnywhereConfig struct {
 }
 
 // AWSRootKeySpec defines the desired state of AWSRootKey.
+// +kubebuilder:validation:XValidation:rule="!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region) && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.trustAnchorArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.profileArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.roleArn.size() > 0))",message="Configured slots require non-empty provider parameters"
 type AWSRootKeySpec struct {
+	// Configured is false for an empty provider slot. Legacy resources default to true.
+	// +optional
+	// +kubebuilder:default=true
+	Configured *bool `json:"configured,omitempty"`
+	// ResetRequest identifies an operator reset requested by the role holder.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ResetRequest string `json:"resetRequest,omitempty"`
+
 	// TenantNameRef is the account-name of the owning Tenant (sibling in
 	// the same workspace). Advisory; the reconciler derives the canonical
 	// tenant identity from the workspace path (showroom#203).
@@ -45,18 +55,18 @@ type AWSRootKeySpec struct {
 	TenantNameRef string `json:"tenantNameRef"`
 
 	// Region is the AWS region hosting the KMS key.
-	// +required
-	Region string `json:"region"`
+	// +optional
+	Region string `json:"region,omitzero"`
 	// KeyURI is the ARN of the upstream AWS KMS key.
-	// +required
-	KeyURI string `json:"keyUri"`
+	// +optional
+	KeyURI string `json:"keyUri,omitzero"`
 	// EndpointURL optionally pins the AWS KMS endpoint (e.g. for VPC endpoints).
 	// +optional
 	EndpointURL string `json:"endpointUrl,omitempty"`
 
 	// RolesAnywhere is the Roles Anywhere federation configuration.
-	// +required
-	RolesAnywhere AWSRolesAnywhereConfig `json:"rolesAnywhere"`
+	// +optional
+	RolesAnywhere AWSRolesAnywhereConfig `json:"rolesAnywhere,omitzero"`
 
 	// Lifecycle is the user-desired key lifecycle. Defaults to Active.
 	// Setting to Deactivated triggers a deactivation roundtrip via the
@@ -69,6 +79,18 @@ type AWSRootKeySpec struct {
 
 // AWSRootKeyStatus defines the observed state of AWSRootKey.
 type AWSRootKeyStatus struct {
+	// RegistrationID identifies the durable backend registration and cancellation fence.
+	// +optional
+	RegistrationID string `json:"registrationId,omitempty"`
+
+	// SlotState is the state of the provider slot.
+	// +optional
+	// +kubebuilder:validation:Enum=Unconfigured;Configuring;Configured;Resetting;ResetFailed
+	SlotState string `json:"slotState,omitempty"`
+	// LastResetRequest identifies the most recent completed reset.
+	// +optional
+	LastResetRequest string `json:"lastResetRequest,omitempty"`
+
 	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

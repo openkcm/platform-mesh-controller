@@ -186,7 +186,6 @@ func TestContentConfiguration(t *testing.T) {
 
 	want := []string{
 		"openkcm=https://openkcm-ui.portal.example.org/pm-content.json",
-		"openkcm-namespace=https://openkcm-ui.portal.example.org/pm-content-namespace.json",
 	}
 	if !slices.Equal(urls, want) {
 		t.Errorf("content URLs %v, want %v", urls, want)

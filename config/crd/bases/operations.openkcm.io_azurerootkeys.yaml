@@ -57,6 +57,11 @@ spec:
           spec:
             description: spec defines the desired state of AzureRootKey
             properties:
+              configured:
+                default: true
+                description: Configured is false for an empty provider slot. Legacy
+                  resources default to true.
+                type: boolean
               federatedIdentity:
                 description: FederatedIdentity is the Azure AD workload-identity federation
                   config.
@@ -86,6 +91,11 @@ spec:
                 - Active
                 - Deactivated
                 type: string
+              resetRequest:
+                description: ResetRequest identifies an operator reset requested by
+                  the role holder.
+                maxLength: 128
+                type: string
               tenantNameRef:
                 description: TenantNameRef is the account-name of the owning Tenant.
                 type: string
@@ -93,11 +103,15 @@ spec:
                 description: VaultURL is the Azure Key Vault endpoint.
                 type: string
             required:
-            - federatedIdentity
-            - keyName
             - tenantNameRef
-            - vaultUrl
             type: object
+            x-kubernetes-validations:
+            - message: Configured slots require non-empty provider parameters
+              rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.vaultUrl)
+                && self.vaultUrl.size() > 0) && (has(self.keyName) && self.keyName.size()
+                > 0) && (has(self.federatedIdentity) && self.federatedIdentity.tenantId.size()
+                > 0) && (has(self.federatedIdentity) && self.federatedIdentity.clientId.size()
+                > 0))'
           status:
             description: status defines the observed state of AzureRootKey
             properties:
@@ -188,6 +202,10 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              lastResetRequest:
+                description: LastResetRequest identifies the most recent completed
+                  reset.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation.
                 format: int64
@@ -256,6 +274,19 @@ spec:
                       completed without error.
                     type: boolean
                 type: object
+              registrationId:
+                description: RegistrationID identifies the durable backend registration
+                  and cancellation fence.
+                type: string
+              slotState:
+                description: SlotState is the state of the provider slot.
+                enum:
+                - Unconfigured
+                - Configuring
+                - Configured
+                - Resetting
+                - ResetFailed
+                type: string
             type: object
         required:
         - spec

@@ -5,9 +5,7 @@ description: >-
   operations.openkcm.io APIExport with its APIResourceSchemas, the ProviderMetadata and
   ContentConfigurations of the portal, and the RBAC for binding the APIExport. No workloads.
 type: application
-# Version of the chart. Increment it for every change to the chart. The APIResourceSchemas are
-# named after it (v<version>-v1alpha1.<resource>), because kcp schemas cannot change.
-version: 0.11.0
+version: 0.11.0 # x-release-please-version
 # Controller release whose CRDs the APIResourceSchemas are generated from. release-please updates
 # it (marker).
 appVersion: "0.0.3" # x-release-please-version

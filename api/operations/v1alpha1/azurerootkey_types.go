@@ -34,24 +34,34 @@ type AzureFederatedIdentityConfig struct {
 }
 
 // AzureRootKeySpec defines the desired state of AzureRootKey.
+// +kubebuilder:validation:XValidation:rule="!self.configured || (self.tenantNameRef.size() > 0 && (has(self.vaultUrl) && self.vaultUrl.size() > 0) && (has(self.keyName) && self.keyName.size() > 0) && (has(self.federatedIdentity) && self.federatedIdentity.tenantId.size() > 0) && (has(self.federatedIdentity) && self.federatedIdentity.clientId.size() > 0))",message="Configured slots require non-empty provider parameters"
 type AzureRootKeySpec struct {
+	// Configured is false for an empty provider slot. Legacy resources default to true.
+	// +optional
+	// +kubebuilder:default=true
+	Configured *bool `json:"configured,omitempty"`
+	// ResetRequest identifies an operator reset requested by the role holder.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ResetRequest string `json:"resetRequest,omitempty"`
+
 	// TenantNameRef is the account-name of the owning Tenant.
 	// +required
 	TenantNameRef string `json:"tenantNameRef"`
 
 	// VaultURL is the Azure Key Vault endpoint.
-	// +required
-	VaultURL string `json:"vaultUrl"`
+	// +optional
+	VaultURL string `json:"vaultUrl,omitzero"`
 	// KeyName is the Azure Key Vault key name.
-	// +required
-	KeyName string `json:"keyName"`
+	// +optional
+	KeyName string `json:"keyName,omitzero"`
 	// KeyVersion optionally pins a specific key version; empty pulls latest.
 	// +optional
 	KeyVersion string `json:"keyVersion,omitempty"`
 
 	// FederatedIdentity is the Azure AD workload-identity federation config.
-	// +required
-	FederatedIdentity AzureFederatedIdentityConfig `json:"federatedIdentity"`
+	// +optional
+	FederatedIdentity AzureFederatedIdentityConfig `json:"federatedIdentity,omitzero"`
 
 	// Lifecycle is the user-desired key lifecycle. Defaults to Active.
 	// +optional
@@ -61,6 +71,18 @@ type AzureRootKeySpec struct {
 
 // AzureRootKeyStatus defines the observed state of AzureRootKey.
 type AzureRootKeyStatus struct {
+	// RegistrationID identifies the durable backend registration and cancellation fence.
+	// +optional
+	RegistrationID string `json:"registrationId,omitempty"`
+
+	// SlotState is the state of the provider slot.
+	// +optional
+	// +kubebuilder:validation:Enum=Unconfigured;Configuring;Configured;Resetting;ResetFailed
+	SlotState string `json:"slotState,omitempty"`
+	// LastResetRequest identifies the most recent completed reset.
+	// +optional
+	LastResetRequest string `json:"lastResetRequest,omitempty"`
+
 	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

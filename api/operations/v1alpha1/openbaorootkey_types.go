@@ -34,24 +34,34 @@ type OpenBaoCertAuthConfig struct {
 }
 
 // OpenBaoRootKeySpec defines the desired state of OpenBaoRootKey.
+// +kubebuilder:validation:XValidation:rule="!self.configured || (self.tenantNameRef.size() > 0 && (has(self.enginePath) && self.enginePath.size() > 0) && (has(self.keyName) && self.keyName.size() > 0) && (has(self.serverAddress) && self.serverAddress.size() > 0) && (has(self.certAuth) && self.certAuth.authMountPath.size() > 0) && (has(self.certAuth) && self.certAuth.roleName.size() > 0))",message="Configured slots require non-empty provider parameters"
 type OpenBaoRootKeySpec struct {
+	// Configured is false for an empty provider slot. Legacy resources default to true.
+	// +optional
+	// +kubebuilder:default=true
+	Configured *bool `json:"configured,omitempty"`
+	// ResetRequest identifies an operator reset requested by the role holder.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	ResetRequest string `json:"resetRequest,omitempty"`
+
 	// TenantNameRef is the account-name of the owning Tenant.
 	// +required
 	TenantNameRef string `json:"tenantNameRef"`
 
 	// EnginePath is the OpenBao Transit engine mount path (e.g. "transit").
-	// +required
-	EnginePath string `json:"enginePath"`
+	// +optional
+	EnginePath string `json:"enginePath,omitzero"`
 	// KeyName is the OpenBao Transit key name.
-	// +required
-	KeyName string `json:"keyName"`
+	// +optional
+	KeyName string `json:"keyName,omitzero"`
 	// ServerAddress is the OpenBao API endpoint.
-	// +required
-	ServerAddress string `json:"serverAddress"`
+	// +optional
+	ServerAddress string `json:"serverAddress,omitzero"`
 
 	// CertAuth is the OpenBao cert-auth backend configuration.
-	// +required
-	CertAuth OpenBaoCertAuthConfig `json:"certAuth"`
+	// +optional
+	CertAuth OpenBaoCertAuthConfig `json:"certAuth,omitzero"`
 
 	// Lifecycle is the user-desired key lifecycle. Defaults to Active.
 	// +optional
@@ -61,6 +71,18 @@ type OpenBaoRootKeySpec struct {
 
 // OpenBaoRootKeyStatus defines the observed state of OpenBaoRootKey.
 type OpenBaoRootKeyStatus struct {
+	// RegistrationID identifies the durable backend registration and cancellation fence.
+	// +optional
+	RegistrationID string `json:"registrationId,omitempty"`
+
+	// SlotState is the state of the provider slot.
+	// +optional
+	// +kubebuilder:validation:Enum=Unconfigured;Configuring;Configured;Resetting;ResetFailed
+	SlotState string `json:"slotState,omitempty"`
+	// LastResetRequest identifies the most recent completed reset.
+	// +optional
+	LastResetRequest string `json:"lastResetRequest,omitempty"`
+
 	// ObservedGeneration is the last observed generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

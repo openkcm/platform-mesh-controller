@@ -193,7 +193,7 @@ func TestControllerFlags(t *testing.T) {
 }
 
 func TestControllerImage(t *testing.T) {
-	const repository = "ghcr.io/openkcm/platform-mesh-controller/images/platform-mesh-controller"
+	const repository = "ghcr.io/openkcm/images/platform-mesh-controller"
 
 	_, appVersion := chartMeta(t, controllerChart)
 

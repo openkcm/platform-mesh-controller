@@ -9,7 +9,7 @@ workspace's kubeconfig.
 | APIExport `operations.openkcm.io` | The OpenKCM resources (Tenant, DomainKey, ServiceKey, the root keys, DataEncryptionKey) that accounts bind from the marketplace |
 | APIResourceSchemas `v<chart version>-v1alpha1.<resource>.operations.openkcm.io` | The schemas of the APIExport, generated from the controller's CRDs |
 | ProviderMetadata `operations.openkcm.io` | The marketplace entry (`branding`) |
-| ContentConfigurations `openkcm`, `openkcm-namespace` | Where the portal loads the OpenKCM microfrontend's navigation from (`publicScheme`, `publicHost`, `metadata`) |
+| ContentConfiguration `openkcm` | Where the portal loads the OpenKCM microfrontend's navigation from (`publicScheme`, `publicHost`, `metadata`) |
 | ClusterRole `apiexport-bind`, ClusterRoleBinding `anonymous-view` | Allow the portal to bind the APIExport for an account, as for every Platform Mesh provider |
 | ClusterRole and ClusterRoleBinding `syncagent-resources-access` | Optional (`rbac.enabled`): access to the OpenKCM resources for a sync agent |
 
@@ -24,9 +24,8 @@ helm install pm-integration oci://ghcr.io/openkcm/charts/pm-integration \
   --set publicScheme=https --set publicHost=openkcm-ui.portal.example.org
 ```
 
-`publicHost` is the host that serves the microfrontend's content files (`/pm-content.json`,
-`/pm-content-namespace.json`). The release notes warn while it is `localhost` or the scheme is
-`http`.
+`publicHost` is the host that serves the microfrontend's content file (`/pm-content.json`). The
+release notes warn while it is `localhost` or the scheme is `http`.
 
 ## Versions and schemas
 
@@ -48,7 +47,7 @@ The helm tests (`make helm-test`) fail when the schemas and the CRDs differ.
 | --- | --- | --- |
 | `publicScheme` | `http` | Scheme of the content URLs; `https` outside a local portal |
 | `publicHost` | `localhost` | Host of the microfrontend's content files |
-| `metadata.contentPath` / `metadata.namespaceContentPath` | `/pm-content.json` / `/pm-content-namespace.json` | Paths of the content files |
+| `metadata.contentPath` | `/pm-content.json` | Path of the content file |
 | `branding.marketplace.title` / `description` | `OpenKCM`, … | The marketplace entry |
 | `rbac.enabled` | `false` | RBAC for a sync agent |
 | `global.commonLabels` | `{}` | Labels of every resource |

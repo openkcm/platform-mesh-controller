@@ -58,6 +58,11 @@ spec:
           spec:
             description: spec defines the desired state of AWSRootKey
             properties:
+              configured:
+                default: true
+                description: Configured is false for an empty provider slot. Legacy
+                  resources default to true.
+                type: boolean
               endpointUrl:
                 description: EndpointURL optionally pins the AWS KMS endpoint (e.g.
                   for VPC endpoints).
@@ -78,6 +83,11 @@ spec:
                 type: string
               region:
                 description: Region is the AWS region hosting the KMS key.
+                type: string
+              resetRequest:
+                description: ResetRequest identifies an operator reset requested by
+                  the role holder.
+                maxLength: 128
                 type: string
               rolesAnywhere:
                 description: RolesAnywhere is the Roles Anywhere federation configuration.
@@ -105,11 +115,16 @@ spec:
                   tenant identity from the workspace path (showroom#203).
                 type: string
             required:
-            - keyUri
-            - region
-            - rolesAnywhere
             - tenantNameRef
             type: object
+            x-kubernetes-validations:
+            - message: Configured slots require non-empty provider parameters
+              rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region)
+                && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size()
+                > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.trustAnchorArn.size()
+                > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.profileArn.size()
+                > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.roleArn.size()
+                > 0))'
           status:
             description: status defines the observed state of AWSRootKey
             properties:
@@ -200,6 +215,10 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              lastResetRequest:
+                description: LastResetRequest identifies the most recent completed
+                  reset.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last observed generation.
                 format: int64
@@ -268,6 +287,19 @@ spec:
                       completed without error.
                     type: boolean
                 type: object
+              registrationId:
+                description: RegistrationID identifies the durable backend registration
+                  and cancellation fence.
+                type: string
+              slotState:
+                description: SlotState is the state of the provider slot.
+                enum:
+                - Unconfigured
+                - Configuring
+                - Configured
+                - Resetting
+                - ResetFailed
+                type: string
             type: object
         required:
         - spec
