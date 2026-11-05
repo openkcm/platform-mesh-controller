@@ -19,6 +19,8 @@ package operations
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -30,7 +32,39 @@ const (
 	openkcmSystemNamespace   = "openkcm-system"
 	caCertKey                = "ca.crt"
 	rootKeyRegisteredMessage = "Root key registered, awaiting activation"
+
+	reasonUnconfigured      = "Unconfigured"
+	slotUnconfiguredMessage = "The slot has no provider configuration."
+	slotStateUnconfigured   = "Unconfigured"
+	slotStateConfiguring    = "Configuring"
+	slotStateConfigured     = "Configured"
+
+	awsSlotName     = "aws"
+	azureSlotName   = "azure"
+	gcpSlotName     = "gcp"
+	hsmSlotName     = "hsm"
+	vaultSlotName   = "vault"
+	openBaoSlotName = "openbao"
 )
+
+func slotConfigured(configured *bool) bool {
+	return configured == nil || *configured
+}
+
+func markSlotUnconfigured(conditions *[]metav1.Condition, slotState *string, generation int64) bool {
+	changed := meta.SetStatusCondition(conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonUnconfigured,
+		Message:            slotUnconfiguredMessage,
+		ObservedGeneration: generation,
+	})
+	if *slotState == slotStateUnconfigured {
+		return changed
+	}
+	*slotState = slotStateUnconfigured
+	return true
+}
 
 // rootKeyGVKEntry pairs a GroupVersionKind with a factory that returns a
 // concrete typed client.Object for that kind. Used by reconcilers that

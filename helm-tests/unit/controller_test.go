@@ -293,6 +293,11 @@ func TestControllerRBAC(t *testing.T) {
 			}
 		}
 	}
+	for _, resource := range []string{"gcprootkeys", "hsmrootkeys", "vaultrootkeys"} {
+		if !clusterRole.allows("operations.openkcm.io", resource, "create") {
+			t.Errorf("the ClusterRole does not grant create on %s", resource)
+		}
+	}
 
 	role := object[rbacRole](t, output, "Role")
 	if role.Metadata.Namespace != namespace || !role.allows("", "configmaps", "update") ||

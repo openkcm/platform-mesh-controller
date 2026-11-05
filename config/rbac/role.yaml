@@ -74,6 +74,14 @@ rules:
 - apiGroups:
   - operations.openkcm.io
   resources:
+  - gcprootkeys
+  - hsmrootkeys
+  - vaultrootkeys
+  verbs:
+  - create
+- apiGroups:
+  - operations.openkcm.io
+  resources:
   - l1keyaccesses
   verbs:
   - create

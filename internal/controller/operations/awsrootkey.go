@@ -75,6 +75,13 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{}, nil
 	}
 
+	if !slotConfigured(rk.Spec.Configured) {
+		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+			return ctrl.Result{}, cl.Status().Update(ctx, rk)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
 	if rk.Status.CryptoState != nil &&
 		rk.Status.CryptoState.LifecycleState == desired &&
@@ -127,6 +134,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			LifecycleState: shared.LifecyclePreActive,
 		}
 		rk.Status.OperationID = resp.ID
+		rk.Status.SlotState = slotStateConfiguring
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
 			Message:            "AWS root key registered; awaiting activation.",
@@ -177,6 +185,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
 		rk.Status.ReconciliationStatus.Message = "AWS KMS bound and authenticated."
+		rk.Status.SlotState = slotStateConfigured
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,
 			Status:             metav1.ConditionTrue,

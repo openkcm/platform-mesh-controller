@@ -24,7 +24,10 @@ const (
 	ReasonDomainKeyInUse    = reasonDomainKeyInUse
 	ReasonFailed            = reasonFailed
 	ReasonProcess           = reasonProcess
+	ReasonUnconfigured      = reasonUnconfigured
 	ServiceKeyFinalizer     = serviceKeyFinalizer
+	SlotStateConfiguring    = slotStateConfiguring
+	SlotStateUnconfigured   = slotStateUnconfigured
 	TenantFinalizer         = tenantFinalizer
 	TenantIDAnnotation      = tenantIDAnnotation
 )
@@ -46,6 +49,7 @@ var (
 	EnsureDomainKey                    = (*AccountBootstrapReconciler).ensureDomainKey
 	EnsureTenant                       = (*AccountBootstrapReconciler).ensureTenant
 	EnsureL1KeyAccess                  = ensureL1KeyAccess
+	EnsureRootKeySlots                 = ensureRootKeySlots
 	FindEarlierDomainKey               = (*DomainKeyReconciler).findEarlierDomainKey
 	InstanceDomainKeyTakenBy           = instanceDomainKeyTakenBy
 	IsOperationsAPIBinding             = isOperationsAPIBinding

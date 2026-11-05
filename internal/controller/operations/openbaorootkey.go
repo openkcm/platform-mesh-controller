@@ -76,6 +76,13 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return ctrl.Result{}, nil
 	}
 
+	if !slotConfigured(rk.Spec.Configured) {
+		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+			return ctrl.Result{}, cl.Status().Update(ctx, rk)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
 	if rk.Status.CryptoState != nil &&
 		rk.Status.CryptoState.LifecycleState == desired &&
@@ -128,6 +135,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 			LifecycleState: shared.LifecyclePreActive,
 		}
 		rk.Status.OperationID = resp.ID
+		rk.Status.SlotState = slotStateConfiguring
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
 			Message:            "OpenBao root key registered; awaiting activation.",
@@ -178,6 +186,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
 		rk.Status.ReconciliationStatus.Message = "OpenBao root key bound and authenticated."
+		rk.Status.SlotState = slotStateConfigured
 
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,

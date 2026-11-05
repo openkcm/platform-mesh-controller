@@ -74,6 +74,13 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		return ctrl.Result{}, nil
 	}
 
+	if !slotConfigured(rk.Spec.Configured) {
+		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+			return ctrl.Result{}, cl.Status().Update(ctx, rk)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
 	if rk.Status.CryptoState != nil &&
 		rk.Status.CryptoState.LifecycleState == desired &&
@@ -125,6 +132,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 			LifecycleState: shared.LifecyclePreActive,
 		}
 		rk.Status.OperationID = resp.ID
+		rk.Status.SlotState = slotStateConfiguring
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
 			Message:            "Azure root key registered; awaiting activation.",
@@ -173,6 +181,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
 		rk.Status.ReconciliationStatus.Message = "Azure Key Vault bound and authenticated."
+		rk.Status.SlotState = slotStateConfigured
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,
 			Status:             metav1.ConditionTrue,
