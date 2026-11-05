@@ -79,16 +79,7 @@ func (r *AzureRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.
 	}
 
 	if !slotConfigured(rk.Spec.Configured) {
-		if rk.Status.CryptoState != nil {
-			if err := r.releaseSlotKey(ctx, cl, rk); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, cl.Status().Update(ctx, rk)
-		}
-		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
-			return ctrl.Result{}, cl.Status().Update(ctx, rk)
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileEmptySlot(ctx, cl, rk)
 	}
 
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
@@ -273,6 +264,21 @@ func (r *AzureRootKeyReconciler) reset(
 	}
 	rk.Spec = operationsv1alpha1.AzureRootKeySpec{Configured: new(false), TenantNameRef: rk.Spec.TenantNameRef}
 	return ctrl.Result{}, cl.Update(ctx, rk)
+}
+
+func (r *AzureRootKeyReconciler) reconcileEmptySlot(
+	ctx context.Context, cl client.Client, rk *operationsv1alpha1.AzureRootKey,
+) (ctrl.Result, error) {
+	if rk.Status.CryptoState != nil {
+		if err := r.releaseSlotKey(ctx, cl, rk); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, cl.Status().Update(ctx, rk)
+	}
+	if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+		return ctrl.Result{}, cl.Status().Update(ctx, rk)
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *AzureRootKeyReconciler) releaseSlotKey(

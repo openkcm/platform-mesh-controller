@@ -80,16 +80,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	if !slotConfigured(rk.Spec.Configured) {
-		if rk.Status.CryptoState != nil {
-			if err := r.releaseSlotKey(ctx, cl, rk); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, cl.Status().Update(ctx, rk)
-		}
-		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
-			return ctrl.Result{}, cl.Status().Update(ctx, rk)
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileEmptySlot(ctx, cl, rk)
 	}
 
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
@@ -285,6 +276,21 @@ func (r *AWSRootKeyReconciler) reset(
 	}
 	rk.Spec = operationsv1alpha1.AWSRootKeySpec{Configured: new(false), TenantNameRef: rk.Spec.TenantNameRef}
 	return ctrl.Result{}, cl.Update(ctx, rk)
+}
+
+func (r *AWSRootKeyReconciler) reconcileEmptySlot(
+	ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+) (ctrl.Result, error) {
+	if rk.Status.CryptoState != nil {
+		if err := r.releaseSlotKey(ctx, cl, rk); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, cl.Status().Update(ctx, rk)
+	}
+	if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+		return ctrl.Result{}, cl.Status().Update(ctx, rk)
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *AWSRootKeyReconciler) releaseSlotKey(
