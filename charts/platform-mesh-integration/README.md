@@ -1,4 +1,4 @@
-# pm-integration Helm chart
+# platform-mesh-integration Helm chart
 
 The chart makes OpenKCM a provider in [Platform Mesh](https://platform-mesh.io/). It contains no
 workloads: install it into the OpenKCM provider workspace of the kcp control plane, with that
@@ -19,7 +19,7 @@ The controller that serves the APIExport is deployed with the
 ## Install
 
 ```sh
-helm install pm-integration oci://ghcr.io/openkcm/charts/pm-integration \
+helm install platform-mesh-integration oci://ghcr.io/openkcm/charts/platform-mesh-integration \
   --version 0.11.0 --kubeconfig openkcm-provider.kubeconfig \
   --set publicScheme=https --set publicHost=openkcm-ui.portal.example.org
 ```
@@ -57,7 +57,7 @@ The resource names are fixed: the portal and the controller find them by name.
 ## Uninstall
 
 ```sh
-helm uninstall pm-integration --kubeconfig openkcm-provider.kubeconfig
+helm uninstall platform-mesh-integration --kubeconfig openkcm-provider.kubeconfig
 ```
 
 Accounts that bound the APIExport lose access to the OpenKCM resources.

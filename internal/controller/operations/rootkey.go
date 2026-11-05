@@ -19,6 +19,8 @@ package operations
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -30,7 +32,75 @@ const (
 	openkcmSystemNamespace   = "openkcm-system"
 	caCertKey                = "ca.crt"
 	rootKeyRegisteredMessage = "Root key registered, awaiting activation"
+
+	reasonUnconfigured      = "Unconfigured"
+	reasonResetFailed       = "ResetFailed"
+	slotUnconfiguredMessage = "The slot has no provider configuration."
+	slotStateUnconfigured   = "Unconfigured"
+	slotStateConfiguring    = "Configuring"
+	slotStateConfigured     = "Configured"
+	slotStateResetFailed    = "ResetFailed"
+
+	awsSlotName     = "aws"
+	azureSlotName   = "azure"
+	gcpSlotName     = "gcp"
+	hsmSlotName     = "hsm"
+	vaultSlotName   = "vault"
+	openBaoSlotName = "openbao"
 )
+
+func slotConfigured(configured *bool) bool {
+	return configured == nil || *configured
+}
+
+func markSlotUnconfigured(conditions *[]metav1.Condition, slotState *string, generation int64) bool {
+	changed := meta.SetStatusCondition(conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonUnconfigured,
+		Message:            slotUnconfiguredMessage,
+		ObservedGeneration: generation,
+	})
+	if *slotState == slotStateUnconfigured {
+		return changed
+	}
+	*slotState = slotStateUnconfigured
+	return true
+}
+
+func deleteSlotKey(ctx context.Context, api Backend, state *shared.CryptoState) error {
+	if state == nil || state.ID == "" {
+		return nil
+	}
+	return api.DeleteRootKey(ctx, state.ID)
+}
+
+func unreconciledSlot(obj client.Object) (*bool, *[]metav1.Condition, *string, bool) {
+	switch slot := obj.(type) {
+	case *operationsv1alpha1.GCPRootKey:
+		return slot.Spec.Configured, &slot.Status.Conditions, &slot.Status.SlotState, true
+	case *operationsv1alpha1.HSMRootKey:
+		return slot.Spec.Configured, &slot.Status.Conditions, &slot.Status.SlotState, true
+	case *operationsv1alpha1.VaultRootKey:
+		return slot.Spec.Configured, &slot.Status.Conditions, &slot.Status.SlotState, true
+	default:
+		return nil, nil, nil, false
+	}
+}
+
+func markUnreconciledSlot(ctx context.Context, cl client.Client, slot client.Object) error {
+	if _, _, _, ok := unreconciledSlot(slot); !ok {
+		return nil
+	}
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(slot), slot); err != nil {
+		return err
+	}
+	configured, conditions, slotState, _ := unreconciledSlot(slot)
+	if slotConfigured(configured) || !markSlotUnconfigured(conditions, slotState, slot.GetGeneration()) {
+		return nil
+	}
+	return cl.Status().Update(ctx, slot)
+}
 
 // rootKeyGVKEntry pairs a GroupVersionKind with a factory that returns a
 // concrete typed client.Object for that kind. Used by reconcilers that

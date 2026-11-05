@@ -5,7 +5,7 @@ kind: ContentConfiguration
 metadata:
   name: openkcm
   labels:
-    {{- include "pm-integration.labels" . | nindent 4 }}
+    {{- include "platform-mesh-integration.labels" . | nindent 4 }}
     ui.platform-mesh.io/entity: core_platform-mesh_io_account
     ui.platform-mesh.io/content-for: operations.openkcm.io
 spec:

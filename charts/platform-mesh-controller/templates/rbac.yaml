@@ -15,6 +15,9 @@ rules:
       - awsrootkeys
       - azurerootkeys
       - openbaorootkeys
+      - gcprootkeys
+      - hsmrootkeys
+      - vaultrootkeys
       - dataencryptionkeys
     verbs: [create, delete, get, list, patch, update, watch]
   - apiGroups: [operations.openkcm.io]
@@ -25,6 +28,9 @@ rules:
       - awsrootkeys/status
       - azurerootkeys/status
       - openbaorootkeys/status
+      - gcprootkeys/status
+      - hsmrootkeys/status
+      - vaultrootkeys/status
       - dataencryptionkeys/status
     verbs: [get, patch, update]
   - apiGroups: [operations.openkcm.io]

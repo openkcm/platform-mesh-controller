@@ -2,7 +2,7 @@
 #
 # The controller integrates OpenKCM into Platform Mesh. It watches the account workspaces of a
 # kcp control plane through the `operations.openkcm.io` APIExport (installed by the
-# pm-integration chart), creates a Tenant for each account that binds the APIExport, and
+# platform-mesh-integration chart), creates a Tenant for each account that binds the APIExport, and
 # reconciles the key resources of the accounts (Tenant, DomainKey, ServiceKey, the root keys
 # for AWS, Azure and OpenBao, DataEncryptionKey) against OpenKCM. It reaches kcp with the
 # kubeconfig in `kcpKubeconfig.secretName`; in its own cluster it only keeps the state of its

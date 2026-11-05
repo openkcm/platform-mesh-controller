@@ -78,8 +78,10 @@ type rootKeyTestReconciler interface {
 type rootKeyReconciliationCase struct {
 	newRootKey       func() client.Object
 	newReconciler    func(*provisioningBackend) rootKeyTestReconciler
+	newSlot          func() client.Object
 	provider         string
 	statusConditions func(client.Object) []metav1.Condition
+	slotState        func(client.Object) string
 }
 
 func ensureRootKeyReconciliationNamespace() {
@@ -176,6 +178,39 @@ func newOpenBaoRootKeyForReconciliation() client.Object {
 	return rootKey
 }
 
+func newAWSSlotForReconciliation() client.Object {
+	GinkgoHelper()
+
+	rootKey := &operationsv1alpha1.AWSRootKey{}
+	rootKey.Name = "aws-slot"
+	rootKey.Namespace = rootKeyReconciliationNamespace
+	rootKey.Spec = operationsv1alpha1.AWSRootKeySpec{Configured: new(false), TenantNameRef: testAccountName}
+	Expect(k8sClient.Create(ctx, rootKey)).To(Succeed())
+	return rootKey
+}
+
+func newAzureSlotForReconciliation() client.Object {
+	GinkgoHelper()
+
+	rootKey := &operationsv1alpha1.AzureRootKey{}
+	rootKey.Name = "azure-slot"
+	rootKey.Namespace = rootKeyReconciliationNamespace
+	rootKey.Spec = operationsv1alpha1.AzureRootKeySpec{Configured: new(false), TenantNameRef: testAccountName}
+	Expect(k8sClient.Create(ctx, rootKey)).To(Succeed())
+	return rootKey
+}
+
+func newOpenBaoSlotForReconciliation() client.Object {
+	GinkgoHelper()
+
+	rootKey := &operationsv1alpha1.OpenBaoRootKey{}
+	rootKey.Name = "openbao-slot"
+	rootKey.Namespace = rootKeyReconciliationNamespace
+	rootKey.Spec = operationsv1alpha1.OpenBaoRootKeySpec{Configured: new(false), TenantNameRef: testAccountName}
+	Expect(k8sClient.Create(ctx, rootKey)).To(Succeed())
+	return rootKey
+}
+
 func rootKeyReconciliationCases() []any {
 	return []any{
 		Entry("AWS", rootKeyReconciliationCase{
@@ -187,9 +222,13 @@ func rootKeyReconciliationCases() []any {
 					AccountNamespace: rootKeyReconciliationNamespace,
 				}
 			},
+			newSlot:  newAWSSlotForReconciliation,
 			provider: "aws",
 			statusConditions: func(obj client.Object) []metav1.Condition {
 				return obj.(*operationsv1alpha1.AWSRootKey).Status.Conditions
+			},
+			slotState: func(obj client.Object) string {
+				return obj.(*operationsv1alpha1.AWSRootKey).Status.SlotState
 			},
 		}),
 		Entry("Azure", rootKeyReconciliationCase{
@@ -201,9 +240,13 @@ func rootKeyReconciliationCases() []any {
 					AccountNamespace: rootKeyReconciliationNamespace,
 				}
 			},
+			newSlot:  newAzureSlotForReconciliation,
 			provider: "azure",
 			statusConditions: func(obj client.Object) []metav1.Condition {
 				return obj.(*operationsv1alpha1.AzureRootKey).Status.Conditions
+			},
+			slotState: func(obj client.Object) string {
+				return obj.(*operationsv1alpha1.AzureRootKey).Status.SlotState
 			},
 		}),
 		Entry("OpenBao", rootKeyReconciliationCase{
@@ -215,9 +258,13 @@ func rootKeyReconciliationCases() []any {
 					AccountNamespace: rootKeyReconciliationNamespace,
 				}
 			},
+			newSlot:  newOpenBaoSlotForReconciliation,
 			provider: "openbao",
 			statusConditions: func(obj client.Object) []metav1.Condition {
 				return obj.(*operationsv1alpha1.OpenBaoRootKey).Status.Conditions
+			},
+			slotState: func(obj client.Object) string {
+				return obj.(*operationsv1alpha1.OpenBaoRootKey).Status.SlotState
 			},
 		}),
 	}
@@ -254,6 +301,9 @@ var _ = Describe("RootKeyReconciler", func() {
 				Expect(backend.rootKeyRequests[0].Provider).To(Equal(testCase.provider))
 				createTenantCalls, _, _ := backend.counts()
 				Expect(createTenantCalls).To(BeZero())
+				reloaded := rootKey.DeepCopyObject().(client.Object)
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rootKey), reloaded)).To(Succeed())
+				Expect(testCase.slotState(reloaded)).To(Equal(operations.SlotStateConfiguring))
 			},
 		}, rootKeyReconciliationCases()...)...,
 	)
@@ -289,6 +339,38 @@ var _ = Describe("RootKeyReconciler", func() {
 				ready := meta.FindStatusCondition(testCase.statusConditions(reloaded), operations.ReadyType)
 				Expect(ready).NotTo(BeNil())
 				Expect(ready.Reason).To(Equal("AwaitingTenant"))
+			},
+		}, rootKeyReconciliationCases()...)...,
+	)
+
+	DescribeTable("leaves empty slots unconfigured without backend calls",
+		append([]any{
+			func(testCase rootKeyReconciliationCase) {
+				backend := &provisioningBackend{}
+				reconciler := testCase.newReconciler(backend)
+				ensureRootKeyReconciliationTenant(true)
+				slot := testCase.newSlot()
+				DeferCleanup(func() {
+					cleanupRootKeyReconciliationObject(slot)
+					cleanupRootKeyReconciliationObject(&operationsv1alpha1.Tenant{
+						Name:      testAccountName,
+						Namespace: rootKeyReconciliationNamespace,
+					})
+				})
+
+				_, err := reconciler.Reconcile(ctx, requestFor(slot))
+				Expect(err).NotTo(HaveOccurred())
+				_, err = reconciler.Reconcile(ctx, requestFor(slot))
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(backend.rootKeyRequests).To(BeEmpty())
+				reloaded := slot.DeepCopyObject().(client.Object)
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(slot), reloaded)).To(Succeed())
+				ready := meta.FindStatusCondition(testCase.statusConditions(reloaded), operations.ReadyType)
+				Expect(ready).NotTo(BeNil())
+				Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+				Expect(ready.Reason).To(Equal(operations.ReasonUnconfigured))
+				Expect(testCase.slotState(reloaded)).To(Equal(operations.SlotStateUnconfigured))
 			},
 		}, rootKeyReconciliationCases()...)...,
 	)

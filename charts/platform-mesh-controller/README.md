@@ -8,7 +8,7 @@ accounts (Tenant, DomainKey, ServiceKey, the root keys for AWS, Azure and OpenBa
 DataEncryptionKey) against OpenKCM.
 
 The APIExport, its schemas and the portal content come from the
-[pm-integration](../pm-integration) chart, installed into the kcp provider workspace.
+[platform-mesh-integration](../platform-mesh-integration) chart, installed into the kcp provider workspace.
 
 > [!WARNING]
 > The controller is in development. By default every reconciler talks to an in-pod mock of
@@ -34,7 +34,7 @@ The APIExport, its schemas and the portal content come from the
 ## Prerequisites
 
 - Kubernetes 1.22 or later, Helm 3.
-- A kcp control plane with Platform Mesh, and the pm-integration chart installed into the
+- A kcp control plane with Platform Mesh, and the platform-mesh-integration chart installed into the
   OpenKCM provider workspace.
 - A kubeconfig for that provider workspace, with a user that may read the
   APIExportEndpointSlice and the virtual workspaces of the APIExport.

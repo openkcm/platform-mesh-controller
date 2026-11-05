@@ -77,6 +77,11 @@ const (
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=l1keyaccesses,verbs=get;create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys;azurerootkeys;gcprootkeys,verbs=create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=hsmrootkeys;vaultrootkeys;openbaorootkeys,verbs=create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys;hsmrootkeys;vaultrootkeys,verbs=get
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys/status;hsmrootkeys/status,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=vaultrootkeys/status,verbs=update
 
 // Reconcile fires when an account workspace creates/binds operations.openkcm.io.
 func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -146,6 +151,9 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	if err := ensureL1KeyAccess(ctx, cl); err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := ensureRootKeySlots(ctx, cl, namespace, accountName); err != nil {
+		return ctrl.Result{}, err
+	}
 	if err := r.ensureDomainKey(ctx, cl, namespace, accountName); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -166,6 +174,48 @@ func ensureL1KeyAccess(ctx context.Context, cl client.Client) error {
 	}
 	marker.Name = operationsv1alpha1.L1KeyAccessName
 	return client.IgnoreAlreadyExists(cl.Create(ctx, marker))
+}
+
+func ensureRootKeySlots(ctx context.Context, cl client.Client, namespace, accountName string) error {
+	for _, slot := range rootKeySlots(accountName) {
+		slot.SetNamespace(namespace)
+		if err := client.IgnoreAlreadyExists(cl.Create(ctx, slot)); err != nil {
+			return err
+		}
+		if err := markUnreconciledSlot(ctx, cl, slot); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rootKeySlots(accountName string) []client.Object {
+	return []client.Object{
+		&operationsv1alpha1.AWSRootKey{
+			Name: awsSlotName,
+			Spec: operationsv1alpha1.AWSRootKeySpec{Configured: new(false), TenantNameRef: accountName},
+		},
+		&operationsv1alpha1.AzureRootKey{
+			Name: azureSlotName,
+			Spec: operationsv1alpha1.AzureRootKeySpec{Configured: new(false), TenantNameRef: accountName},
+		},
+		&operationsv1alpha1.GCPRootKey{
+			Name: gcpSlotName,
+			Spec: operationsv1alpha1.GCPRootKeySpec{Configured: new(false), TenantNameRef: accountName},
+		},
+		&operationsv1alpha1.HSMRootKey{
+			Name: hsmSlotName,
+			Spec: operationsv1alpha1.HSMRootKeySpec{Configured: new(false), TenantNameRef: accountName},
+		},
+		&operationsv1alpha1.VaultRootKey{
+			Name: vaultSlotName,
+			Spec: operationsv1alpha1.VaultRootKeySpec{Configured: new(false), TenantNameRef: accountName},
+		},
+		&operationsv1alpha1.OpenBaoRootKey{
+			Name: openBaoSlotName,
+			Spec: operationsv1alpha1.OpenBaoRootKeySpec{Configured: new(false), TenantNameRef: accountName},
+		},
+	}
 }
 
 func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client.Client, namespace, accountName string) error {
@@ -452,7 +502,7 @@ func activeRootKeyRefs(ctx context.Context, cl client.Client, namespace string) 
 	}
 	for i := range awsRoots.Items {
 		rk := &awsRoots.Items[i]
-		if rk.Status.CryptoState != nil {
+		if rk.Status.CryptoState != nil && slotConfigured(rk.Spec.Configured) {
 			appendRoot("AWSRootKey", rk.Name, rk.CreationTimestamp, rk.DeletionTimestamp, rk.Status.CryptoState.LifecycleState)
 		}
 	}
@@ -463,7 +513,7 @@ func activeRootKeyRefs(ctx context.Context, cl client.Client, namespace string) 
 	}
 	for i := range azureRoots.Items {
 		rk := &azureRoots.Items[i]
-		if rk.Status.CryptoState != nil {
+		if rk.Status.CryptoState != nil && slotConfigured(rk.Spec.Configured) {
 			appendRoot("AzureRootKey", rk.Name, rk.CreationTimestamp, rk.DeletionTimestamp, rk.Status.CryptoState.LifecycleState)
 		}
 	}
@@ -474,7 +524,7 @@ func activeRootKeyRefs(ctx context.Context, cl client.Client, namespace string) 
 	}
 	for i := range openBaoRoots.Items {
 		rk := &openBaoRoots.Items[i]
-		if rk.Status.CryptoState != nil {
+		if rk.Status.CryptoState != nil && slotConfigured(rk.Spec.Configured) {
 			appendRoot("OpenBaoRootKey", rk.Name, rk.CreationTimestamp, rk.DeletionTimestamp, rk.Status.CryptoState.LifecycleState)
 		}
 	}

@@ -39,6 +39,12 @@ const (
 	teamA                       = "team-a"
 	igorTenant                  = "igor"
 	testInstanceDomainKeyName   = "orders-db"
+	testAWSSlot                 = "aws"
+	testAzureSlot               = "azure"
+	testGCPSlot                 = "gcp"
+	testHSMSlot                 = "hsm"
+	testVaultSlot               = "vault"
+	testOpenBaoSlot             = "openbao"
 )
 
 func TestIsOperationsAPIBinding(t *testing.T) {
@@ -723,4 +729,122 @@ func TestEnsureL1KeyAccessReturnsTheReadError(t *testing.T) {
 	// then
 	require.ErrorIs(t, err, readErr)
 	assert.False(t, created)
+}
+
+func TestEnsureRootKeySlotsCreatesEmptySlots(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(slotsWithoutReconciler()...).Build()
+
+	// when
+	err := operations.EnsureRootKeySlots(ctx, cl, testDefaultTenantNamespace, igorTenant)
+
+	// then
+	require.NoError(t, err)
+	for name, slot := range rootKeySlotsByName() {
+		require.NoError(t, cl.Get(ctx, types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: name}, slot))
+		configured, tenant := rootKeySlotSpec(t, slot)
+		require.NotNil(t, configured, name)
+		assert.False(t, *configured, name)
+		assert.Equal(t, igorTenant, tenant, name)
+	}
+}
+
+func TestEnsureRootKeySlotsKeepsAConfiguredSlot(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(slotsWithoutReconciler()...).
+		WithObjects(&operationsv1alpha1.AWSRootKey{
+			Name:      testAWSSlot,
+			Namespace: testDefaultTenantNamespace,
+			Spec: operationsv1alpha1.AWSRootKeySpec{
+				Configured:    new(true),
+				TenantNameRef: igorTenant,
+				Region:        testRegion,
+			},
+		}).
+		Build()
+
+	// when
+	err := operations.EnsureRootKeySlots(ctx, cl, testDefaultTenantNamespace, igorTenant)
+
+	// then
+	require.NoError(t, err)
+	aws := &operationsv1alpha1.AWSRootKey{}
+	require.NoError(t, cl.Get(ctx, types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: testAWSSlot}, aws))
+	require.NotNil(t, aws.Spec.Configured)
+	assert.True(t, *aws.Spec.Configured)
+	assert.Equal(t, testRegion, aws.Spec.Region)
+}
+
+func TestEnsureAutoDomainKeyForNamespaceSkipsUnconfiguredRootKey(t *testing.T) {
+	// given
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&operationsv1alpha1.OpenBaoRootKey{
+			Name:      testOpenBaoSlot,
+			Namespace: testDefaultTenantNamespace,
+			Spec:      operationsv1alpha1.OpenBaoRootKeySpec{Configured: new(false), TenantNameRef: igorTenant},
+			Status: operationsv1alpha1.OpenBaoRootKeyStatus{
+				CryptoState: &shared.CryptoState{LifecycleState: shared.LifecycleActive},
+			},
+		}).
+		Build()
+
+	// when
+	err := operations.EnsureAutoDomainKeyForNamespace(ctx, cl, testDefaultTenantNamespace, teamA, igorTenant)
+
+	// then
+	require.NoError(t, err)
+	domainKeys := &operationsv1alpha1.DomainKeyList{}
+	require.NoError(t, cl.List(ctx, domainKeys, client.InNamespace(teamA)))
+	assert.Empty(t, domainKeys.Items)
+}
+
+func slotsWithoutReconciler() []client.Object {
+	return []client.Object{
+		&operationsv1alpha1.GCPRootKey{},
+		&operationsv1alpha1.HSMRootKey{},
+		&operationsv1alpha1.VaultRootKey{},
+	}
+}
+
+func rootKeySlotsByName() map[string]client.Object {
+	return map[string]client.Object{
+		testAWSSlot:     &operationsv1alpha1.AWSRootKey{},
+		testAzureSlot:   &operationsv1alpha1.AzureRootKey{},
+		testGCPSlot:     &operationsv1alpha1.GCPRootKey{},
+		testHSMSlot:     &operationsv1alpha1.HSMRootKey{},
+		testVaultSlot:   &operationsv1alpha1.VaultRootKey{},
+		testOpenBaoSlot: &operationsv1alpha1.OpenBaoRootKey{},
+	}
+}
+
+func rootKeySlotSpec(t *testing.T, obj client.Object) (*bool, string) {
+	t.Helper()
+	switch slot := obj.(type) {
+	case *operationsv1alpha1.AWSRootKey:
+		return slot.Spec.Configured, slot.Spec.TenantNameRef
+	case *operationsv1alpha1.AzureRootKey:
+		return slot.Spec.Configured, slot.Spec.TenantNameRef
+	case *operationsv1alpha1.GCPRootKey:
+		return slot.Spec.Configured, slot.Spec.TenantNameRef
+	case *operationsv1alpha1.HSMRootKey:
+		return slot.Spec.Configured, slot.Spec.TenantNameRef
+	case *operationsv1alpha1.VaultRootKey:
+		return slot.Spec.Configured, slot.Spec.TenantNameRef
+	case *operationsv1alpha1.OpenBaoRootKey:
+		return slot.Spec.Configured, slot.Spec.TenantNameRef
+	}
+	t.Fatalf("unexpected slot type %T", obj)
+	return nil, ""
 }

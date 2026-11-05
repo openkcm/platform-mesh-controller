@@ -4,7 +4,7 @@ kind: ClusterRole
 metadata:
   name: syncagent-resources-access
   labels:
-    {{- include "pm-integration.labels" . | nindent 4 }}
+    {{- include "platform-mesh-integration.labels" . | nindent 4 }}
 rules:
   - apiGroups:
       - operations.openkcm.io
@@ -36,6 +36,9 @@ rules:
       - awsrootkeys/status
       - azurerootkeys/status
       - openbaorootkeys/status
+      - gcprootkeys/status
+      - vaultrootkeys/status
+      - hsmrootkeys/status
       - dataencryptionkeys/status
     verbs:
       - get
@@ -87,7 +90,7 @@ kind: ClusterRoleBinding
 metadata:
   name: syncagent-resources-access
   labels:
-    {{- include "pm-integration.labels" . | nindent 4 }}
+    {{- include "platform-mesh-integration.labels" . | nindent 4 }}
 subjects:
   - kind: User
     name: cluster-admin

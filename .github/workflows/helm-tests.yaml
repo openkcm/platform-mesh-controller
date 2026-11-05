@@ -35,7 +35,7 @@ jobs:
       - name: Lint the charts
         run: |
           helm lint --strict charts/platform-mesh-controller
-          helm lint --strict charts/pm-integration
+          helm lint --strict charts/platform-mesh-integration
 
       # Renders the charts with `helm template`, builds the controller to check the arguments
       # of the chart, and compares the CRDs and APIResourceSchemas; no cluster needed. The

@@ -76,6 +76,17 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		return ctrl.Result{}, nil
 	}
 
+	if rk.Spec.ResetRequest != "" {
+		return r.reset(ctx, cl, rk)
+	}
+
+	if !slotConfigured(rk.Spec.Configured) {
+		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+			return ctrl.Result{}, cl.Status().Update(ctx, rk)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
 	if rk.Status.CryptoState != nil &&
 		rk.Status.CryptoState.LifecycleState == desired &&
@@ -85,6 +96,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 
 	// Step 1: register with mock API.
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
+		rk.Status.SlotState = slotStateConfiguring
 		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
@@ -178,6 +190,7 @@ func (r *OpenBaoRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcil
 		rk.Status.CryptoState.LastRotatedAt = &now
 		rk.Status.ReconciliationStatus.LastTransitionTime = &now
 		rk.Status.ReconciliationStatus.Message = "OpenBao root key bound and authenticated."
+		rk.Status.SlotState = slotStateConfigured
 
 		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
 			Type:               readyType,
@@ -251,6 +264,28 @@ func (r *OpenBaoRootKeyReconciler) handleDeletion(ctx context.Context, cl client
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *OpenBaoRootKeyReconciler) reset(
+	ctx context.Context, cl client.Client, rk *operationsv1alpha1.OpenBaoRootKey,
+) (ctrl.Result, error) {
+	if rk.Status.LastResetRequest != rk.Spec.ResetRequest {
+		if err := deleteSlotKey(ctx, r.APIClient, rk.Status.CryptoState); err != nil {
+			rk.Status.SlotState = slotStateResetFailed
+			r.setFailed(ctx, cl, rk, reasonResetFailed, err.Error())
+			return ctrl.Result{}, err
+		}
+		rk.Status.CryptoState = nil
+		rk.Status.OperationID = ""
+		rk.Status.ReconciliationStatus = nil
+		rk.Status.LastResetRequest = rk.Spec.ResetRequest
+		markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation)
+		if err := cl.Status().Update(ctx, rk); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	rk.Spec = operationsv1alpha1.OpenBaoRootKeySpec{Configured: new(false), TenantNameRef: rk.Spec.TenantNameRef}
+	return ctrl.Result{}, cl.Update(ctx, rk)
 }
 
 func (r *OpenBaoRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.OpenBaoRootKey, reason, message string) {

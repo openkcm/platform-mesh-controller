@@ -1,7 +1,7 @@
 //go:build helmtests
 
 // Package unit_test renders the charts of this repository (charts/platform-mesh-controller and
-// charts/pm-integration) with `helm template` and checks the output; it runs the controller
+// charts/platform-mesh-integration) with `helm template` and checks the output; it runs the controller
 // binary to check the arguments that the chart passes. It needs the helm command, but no
 // cluster. Run from the repository root:
 //
@@ -23,7 +23,7 @@ import (
 
 const (
 	controllerChart  = "../../charts/platform-mesh-controller"
-	integrationChart = "../../charts/pm-integration"
+	integrationChart = "../../charts/platform-mesh-integration"
 	releaseName      = "pmc"
 	namespace        = "platform-mesh-controller-system"
 )

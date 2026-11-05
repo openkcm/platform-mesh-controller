@@ -1,5 +1,6 @@
 {{- $baseUrl := printf "%s://%s" (.Values.publicScheme | default "https") (.Values.publicHost | default "localhost") -}}
-pm-integration {{ .Chart.Version }} (controller {{ .Chart.AppVersion }}) is installed in the kcp workspace of the kubeconfig.
+platform-mesh-integration {{ .Chart.Version }} (controller {{ .Chart.AppVersion }}) is installed
+in the kcp workspace of the kubeconfig.
 
 APIExport          : operations.openkcm.io
 APIResourceSchemas : v{{ .Chart.Version | replace "." "-" }}-v1alpha1.<resource>.operations.openkcm.io
@@ -20,4 +21,4 @@ WARNINGS:
 {{- end }}
 {{- end }}
 
-Documentation: https://github.com/openkcm/platform-mesh-controller/tree/main/charts/pm-integration
+Documentation: https://github.com/openkcm/platform-mesh-controller/tree/main/charts/platform-mesh-integration
