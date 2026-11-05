@@ -75,6 +75,10 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		return ctrl.Result{}, nil
 	}
 
+	if rk.Spec.ResetRequest != "" {
+		return r.reset(ctx, cl, rk)
+	}
+
 	if !slotConfigured(rk.Spec.Configured) {
 		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
 			return ctrl.Result{}, cl.Status().Update(ctx, rk)
@@ -90,6 +94,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
+		rk.Status.SlotState = slotStateConfiguring
 		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
 		if err != nil {
 			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
@@ -134,7 +139,6 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 			LifecycleState: shared.LifecyclePreActive,
 		}
 		rk.Status.OperationID = resp.ID
-		rk.Status.SlotState = slotStateConfiguring
 		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 			Success:            true,
 			Message:            "AWS root key registered; awaiting activation.",
@@ -259,6 +263,28 @@ func (r *AWSRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Cli
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func (r *AWSRootKeyReconciler) reset(
+	ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+) (ctrl.Result, error) {
+	if rk.Status.LastResetRequest != rk.Spec.ResetRequest {
+		if err := deleteSlotKey(ctx, r.APIClient, rk.Status.CryptoState); err != nil {
+			rk.Status.SlotState = slotStateResetFailed
+			r.setFailed(ctx, cl, rk, reasonResetFailed, err.Error())
+			return ctrl.Result{}, err
+		}
+		rk.Status.CryptoState = nil
+		rk.Status.OperationID = ""
+		rk.Status.ReconciliationStatus = nil
+		rk.Status.LastResetRequest = rk.Spec.ResetRequest
+		markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation)
+		if err := cl.Status().Update(ctx, rk); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	rk.Spec = operationsv1alpha1.AWSRootKeySpec{Configured: new(false), TenantNameRef: rk.Spec.TenantNameRef}
+	return ctrl.Result{}, cl.Update(ctx, rk)
 }
 
 func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey, reason, message string) {

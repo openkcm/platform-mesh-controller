@@ -28,6 +28,9 @@ rules:
       - awsrootkeys/status
       - azurerootkeys/status
       - openbaorootkeys/status
+      - gcprootkeys/status
+      - hsmrootkeys/status
+      - vaultrootkeys/status
       - dataencryptionkeys/status
     verbs: [get, patch, update]
   - apiGroups: [operations.openkcm.io]

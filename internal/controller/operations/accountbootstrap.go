@@ -79,6 +79,9 @@ const (
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=l1keyaccesses,verbs=get;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys;azurerootkeys;gcprootkeys,verbs=create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=hsmrootkeys;vaultrootkeys;openbaorootkeys,verbs=create
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys;hsmrootkeys;vaultrootkeys,verbs=get
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys/status;hsmrootkeys/status,verbs=update
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=vaultrootkeys/status,verbs=update
 
 // Reconcile fires when an account workspace creates/binds operations.openkcm.io.
 func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -177,6 +180,9 @@ func ensureRootKeySlots(ctx context.Context, cl client.Client, namespace, accoun
 	for _, slot := range rootKeySlots(accountName) {
 		slot.SetNamespace(namespace)
 		if err := client.IgnoreAlreadyExists(cl.Create(ctx, slot)); err != nil {
+			return err
+		}
+		if err := markUnreconciledSlot(ctx, cl, slot); err != nil {
 			return err
 		}
 	}
