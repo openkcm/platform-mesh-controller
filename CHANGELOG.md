@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.2 (2026-11-05)
+
+## What's Changed
+* fix: create and reset empty L1 slots by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/53
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.12.1...v0.12.2
+
 ## 0.12.1 (2026-11-04)
 
 ## What's Changed
