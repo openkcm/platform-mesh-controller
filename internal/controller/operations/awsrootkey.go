@@ -80,10 +80,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	if !slotConfigured(rk.Spec.Configured) {
-		if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
-			return ctrl.Result{}, cl.Status().Update(ctx, rk)
-		}
-		return ctrl.Result{}, nil
+		return r.reconcileEmptySlot(ctx, cl, rk)
 	}
 
 	desired := desiredLifecycleState(rk.Spec.Lifecycle)
@@ -269,22 +266,46 @@ func (r *AWSRootKeyReconciler) reset(
 	ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
 ) (ctrl.Result, error) {
 	if rk.Status.LastResetRequest != rk.Spec.ResetRequest {
-		if err := deleteSlotKey(ctx, r.APIClient, rk.Status.CryptoState); err != nil {
-			rk.Status.SlotState = slotStateResetFailed
-			r.setFailed(ctx, cl, rk, reasonResetFailed, err.Error())
+		if err := r.releaseSlotKey(ctx, cl, rk); err != nil {
 			return ctrl.Result{}, err
 		}
-		rk.Status.CryptoState = nil
-		rk.Status.OperationID = ""
-		rk.Status.ReconciliationStatus = nil
 		rk.Status.LastResetRequest = rk.Spec.ResetRequest
-		markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation)
 		if err := cl.Status().Update(ctx, rk); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 	rk.Spec = operationsv1alpha1.AWSRootKeySpec{Configured: new(false), TenantNameRef: rk.Spec.TenantNameRef}
 	return ctrl.Result{}, cl.Update(ctx, rk)
+}
+
+func (r *AWSRootKeyReconciler) reconcileEmptySlot(
+	ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+) (ctrl.Result, error) {
+	if rk.Status.CryptoState != nil {
+		if err := r.releaseSlotKey(ctx, cl, rk); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, cl.Status().Update(ctx, rk)
+	}
+	if markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation) {
+		return ctrl.Result{}, cl.Status().Update(ctx, rk)
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *AWSRootKeyReconciler) releaseSlotKey(
+	ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+) error {
+	if err := deleteSlotKey(ctx, r.APIClient, rk.Status.CryptoState); err != nil {
+		rk.Status.SlotState = slotStateResetFailed
+		r.setFailed(ctx, cl, rk, reasonResetFailed, err.Error())
+		return err
+	}
+	rk.Status.CryptoState = nil
+	rk.Status.OperationID = ""
+	rk.Status.ReconciliationStatus = nil
+	markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation)
+	return nil
 }
 
 func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey, reason, message string) {
