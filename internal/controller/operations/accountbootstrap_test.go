@@ -736,7 +736,7 @@ func TestEnsureRootKeySlotsCreatesEmptySlots(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
-	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(slotsWithoutReconciler()...).Build()
 
 	// when
 	err := operations.EnsureRootKeySlots(ctx, cl, testDefaultTenantNamespace, igorTenant)
@@ -759,6 +759,7 @@ func TestEnsureRootKeySlotsKeepsAConfiguredSlot(t *testing.T) {
 	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
+		WithStatusSubresource(slotsWithoutReconciler()...).
 		WithObjects(&operationsv1alpha1.AWSRootKey{
 			Name:      testAWSSlot,
 			Namespace: testDefaultTenantNamespace,
@@ -807,6 +808,14 @@ func TestEnsureAutoDomainKeyForNamespaceSkipsUnconfiguredRootKey(t *testing.T) {
 	domainKeys := &operationsv1alpha1.DomainKeyList{}
 	require.NoError(t, cl.List(ctx, domainKeys, client.InNamespace(teamA)))
 	assert.Empty(t, domainKeys.Items)
+}
+
+func slotsWithoutReconciler() []client.Object {
+	return []client.Object{
+		&operationsv1alpha1.GCPRootKey{},
+		&operationsv1alpha1.HSMRootKey{},
+		&operationsv1alpha1.VaultRootKey{},
+	}
 }
 
 func rootKeySlotsByName() map[string]client.Object {
