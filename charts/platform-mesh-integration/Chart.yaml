@@ -1,5 +1,5 @@
 apiVersion: v2
-name: pm-integration
+name: platform-mesh-integration
 description: >-
   OpenKCM provider metadata for Platform Mesh, applied to the kcp provider workspace: the
   operations.openkcm.io APIExport with its APIResourceSchemas, the ProviderMetadata and

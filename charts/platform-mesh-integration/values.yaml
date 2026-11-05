@@ -1,4 +1,4 @@
-# Default values for the pm-integration chart.
+# Default values for the platform-mesh-integration chart.
 #
 # The chart makes OpenKCM a provider in Platform Mesh. Install it with the kubeconfig of the
 # kcp provider workspace of OpenKCM (`helm install … --kubeconfig <kcp kubeconfig>`). It

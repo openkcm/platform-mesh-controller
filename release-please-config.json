@@ -60,7 +60,7 @@
         },
         {
           "type": "generic",
-          "path": "charts/pm-integration/Chart.yaml"
+          "path": "charts/platform-mesh-integration/Chart.yaml"
         }
       ]
     }

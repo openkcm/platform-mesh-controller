@@ -33,11 +33,11 @@ single deployment serves every account workspace.
 | Chart | What it installs |
 |---|---|
 | `charts/platform-mesh-controller` | the controller deployment, RBAC and CRDs |
-| `charts/pm-integration` | kcp metadata: `APIExport`, `APIResourceSchema`, `ProviderMetadata`, `ContentConfiguration`. No workloads |
+| `charts/platform-mesh-integration` | kcp metadata: `APIExport`, `APIResourceSchema`, `ProviderMetadata`, `ContentConfiguration`. No workloads |
 
 The microfrontend served to the Platform Mesh portal stays in the Showroom
 repository and is contributed to there; only the controller moved here.
-`pm-integration` references it by URL only.
+`platform-mesh-integration` references it by URL only.
 
 ## Requirements and Setup
 
@@ -65,7 +65,7 @@ make envtest
 ### Install
 
 ```sh
-helm install pm-integration charts/pm-integration --kubeconfig <kcp-kubeconfig>
+helm install platform-mesh-integration charts/platform-mesh-integration --kubeconfig <kcp-kubeconfig>
 helm install operator charts/platform-mesh-controller -n platform-mesh-controller-system --create-namespace
 ```
 

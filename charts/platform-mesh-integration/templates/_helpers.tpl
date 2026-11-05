@@ -1,10 +1,10 @@
 {{/* vim: set filetype=mustache: */}}
 
-{{- define "pm-integration.name" -}}
+{{- define "platform-mesh-integration.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "pm-integration.fullname" -}}
+{{- define "platform-mesh-integration.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -17,13 +17,13 @@
 {{- end }}
 {{- end }}
 
-{{- define "pm-integration.chart" -}}
+{{- define "platform-mesh-integration.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "pm-integration.labels" -}}
-helm.sh/chart: {{ include "pm-integration.chart" . }}
-app.kubernetes.io/name: {{ include "pm-integration.name" . }}
+{{- define "platform-mesh-integration.labels" -}}
+helm.sh/chart: {{ include "platform-mesh-integration.chart" . }}
+app.kubernetes.io/name: {{ include "platform-mesh-integration.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}

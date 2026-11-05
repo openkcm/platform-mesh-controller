@@ -64,7 +64,7 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# Helm chart unit tests: render charts/platform-mesh-controller and charts/pm-integration with
+# Helm chart unit tests: render charts/platform-mesh-controller and charts/platform-mesh-integration with
 # `helm template`, check the controller's flags and the schemas against the CRDs. Needs the helm
 # command, no cluster.
 .PHONY: helm-test
