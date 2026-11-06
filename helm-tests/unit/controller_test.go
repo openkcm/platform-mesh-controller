@@ -17,6 +17,7 @@ import (
 const (
 	// kryptonAddr sets the address of Krypton; openKCMURL a real OpenKCM API.
 	kryptonAddr = "krypton.grpcAddr=krypton-root.services.svc:8080"
+	kryptonTLS  = "krypton.tls=true"
 	openKCMURL  = "openkcmAPI.url=https://openkcm.example.org"
 
 	l1Admission     = "l1Authorization.enabled=true"
@@ -172,7 +173,7 @@ func TestControllerFlags(t *testing.T) {
 
 	for name, args := range map[string][]string{
 		"defaults":          nil,
-		"Krypton":           set(kryptonAddr),
+		"Krypton":           set(kryptonAddr, kryptonTLS),
 		"L1 admission":      set(l1Admission),
 		"extraArgs example": {"-f", writeValues(t, extraArgs)},
 	} {

@@ -18,6 +18,7 @@ package main
 
 import (
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"context"
@@ -73,6 +74,7 @@ func main() {
 	var l1AdmissionAddr string
 	var openkcmAPIURL string
 	var kryptonAddr string
+	var kryptonTLS bool
 	var metricsAddr string
 	var metricsSecure bool
 	var probeAddr string
@@ -103,9 +105,12 @@ func main() {
 		"krypton-grpc-addr",
 		"",
 		"Krypton admin gRPC address (host:port). When set, Tenant, DomainKey, ServiceKey and DataEncryptionKey "+
-			"reconciliation talk to Krypton instead of the OpenKCM HTTP API. The "+
-			"connection is currently plaintext: transport security for the showroom "+
-			"gateway is unresolved.",
+			"reconciliation talk to Krypton instead of the OpenKCM HTTP API.",
+	)
+	flag.BoolVar(&kryptonTLS,
+		"krypton-tls",
+		false,
+		"Connect to Krypton over TLS, verified against the system CA certificates. False: plaintext.",
 	)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics bind address")
 	flag.BoolVar(&metricsSecure, "metrics-secure", false, "Serve metrics over HTTPS with Kubernetes authn/authz")
@@ -211,7 +216,7 @@ func main() {
 	var keyBackend operationscontroller.KeyBackend = apiClient
 	var dataEncryptionKeyBackend operationscontroller.DataEncryptionKeyBackend = apiClient
 	if kryptonAddr != "" {
-		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(kryptonCredentials(kryptonTLS)))
 		if err != nil {
 			setupLog.Error(err, "Failed to connect to Krypton", "addr", kryptonAddr)
 			os.Exit(1)
@@ -351,4 +356,11 @@ func main() {
 		setupLog.Error(err, "Manager exited with error")
 		os.Exit(1)
 	}
+}
+
+func kryptonCredentials(useTLS bool) credentials.TransportCredentials {
+	if useTLS {
+		return credentials.NewClientTLSFromCert(nil, "")
+	}
+	return insecure.NewCredentials()
 }
