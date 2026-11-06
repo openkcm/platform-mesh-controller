@@ -220,10 +220,12 @@ openkcmAPI:
 krypton:
   # -- `host:port` of the gRPC API of the Krypton root node, for example
   # `krypton-root.services.svc:8080`. When set, the Tenant, DomainKey, ServiceKey and
-  # DataEncryptionKey reconcilers use Krypton instead of `openkcmAPI.url`. The connection is
-  # plaintext: use it inside a service mesh with mutual TLS, to a root node without
-  # `config.auth`. Empty: the mock API.
+  # DataEncryptionKey reconcilers use Krypton instead of `openkcmAPI.url`. The controller sends no
+  # credentials: use a root node without `config.auth`. Empty: the mock API.
   grpcAddr: ""
+  # -- Connect to `grpcAddr` over TLS, verified against the CA certificates of the image, for a
+  # Krypton behind a TLS gateway. False: plaintext, inside a service mesh with mutual TLS.
+  tls: false
 
 l1Authorization:
   # -- Serve the L1 access webhook that the ValidatingWebhookConfiguration of the OpenKCM

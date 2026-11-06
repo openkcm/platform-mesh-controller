@@ -73,6 +73,7 @@ kubectl -n platform-mesh-controller-system logs deployment/platform-mesh-control
 | `operations.apiExportEndpointSliceName` | `operations.openkcm.io` | The APIExportEndpointSlice of the APIExport |
 | `tenantNamespace` | `default` | Namespace of the Tenant and keys in each account workspace |
 | `krypton.grpcAddr` | `""` | Krypton's gRPC API; empty: the mock API |
+| `krypton.tls` | `false` | TLS to `krypton.grpcAddr`, verified against the CA certificates of the image |
 | `openkcmAPI.url` | the in-pod mock API | OpenKCM API of the root key reconcilers |
 | `l1Authorization.enabled` | `false` | Serve the L1 access webhook; it allows every review |
 | `l1Authorization.ingress.host` | `""` | Host of `https://<host>/validate-l1-access`, with `ingress.enabled` |
@@ -84,7 +85,7 @@ kubectl -n platform-mesh-controller-system logs deployment/platform-mesh-control
 | From the controller to | Configured by | Transport |
 | --- | --- | --- |
 | kcp | `kcpKubeconfig.secretName` | As in the kubeconfig |
-| Krypton | `krypton.grpcAddr` | Plaintext gRPC: inside a service mesh with mutual TLS |
+| Krypton | `krypton.grpcAddr` | Plaintext gRPC inside a service mesh with mutual TLS, or TLS with `krypton.tls` |
 | OpenKCM API | `openkcmAPI.url` | HTTP(S) as in the URL |
 | Kubernetes API of the hosting cluster | ServiceAccount token | The mock API's state ConfigMap |
 
