@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.0 (2026-11-09)
+
+## What's Changed
+* feat: stop creating root key slots for new accounts by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/63
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.13.0...v0.14.0
+
 ## 0.13.0 (2026-11-09)
 
 ## What's Changed

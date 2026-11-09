@@ -63,7 +63,7 @@ image:
   # -- Image repository, with the registry.
   repository: ghcr.io/openkcm/images/platform-mesh-controller
   # -- Image tag. Empty: the chart's appVersion. release-please updates it (marker).
-  tag: v0.13.0 # x-release-please-version
+  tag: v0.14.0 # x-release-please-version
   # -- Image digest, for example `sha256:0e07…`. With a tag, the image is `<tag>@<digest>`;
   # the digest decides which image is pulled. Use a digest for reproducible deployments.
   digest: ""
