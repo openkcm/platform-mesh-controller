@@ -40,13 +40,6 @@ const (
 	slotStateConfiguring    = "Configuring"
 	slotStateConfigured     = "Configured"
 	slotStateResetFailed    = "ResetFailed"
-
-	awsSlotName     = "aws"
-	azureSlotName   = "azure"
-	gcpSlotName     = "gcp"
-	hsmSlotName     = "hsm"
-	vaultSlotName   = "vault"
-	openBaoSlotName = "openbao"
 )
 
 func slotConfigured(configured *bool) bool {
@@ -73,33 +66,6 @@ func deleteSlotKey(ctx context.Context, api Backend, state *shared.CryptoState) 
 		return nil
 	}
 	return api.DeleteRootKey(ctx, state.ID)
-}
-
-func unreconciledSlot(obj client.Object) (*bool, *[]metav1.Condition, *string, bool) {
-	switch slot := obj.(type) {
-	case *operationsv1alpha1.GCPRootKey:
-		return slot.Spec.Configured, &slot.Status.Conditions, &slot.Status.SlotState, true
-	case *operationsv1alpha1.HSMRootKey:
-		return slot.Spec.Configured, &slot.Status.Conditions, &slot.Status.SlotState, true
-	case *operationsv1alpha1.VaultRootKey:
-		return slot.Spec.Configured, &slot.Status.Conditions, &slot.Status.SlotState, true
-	default:
-		return nil, nil, nil, false
-	}
-}
-
-func markUnreconciledSlot(ctx context.Context, cl client.Client, slot client.Object) error {
-	if _, _, _, ok := unreconciledSlot(slot); !ok {
-		return nil
-	}
-	if err := cl.Get(ctx, client.ObjectKeyFromObject(slot), slot); err != nil {
-		return err
-	}
-	configured, conditions, slotState, _ := unreconciledSlot(slot)
-	if slotConfigured(configured) || !markSlotUnconfigured(conditions, slotState, slot.GetGeneration()) {
-		return nil
-	}
-	return cl.Status().Update(ctx, slot)
 }
 
 // rootKeyGVKEntry pairs a GroupVersionKind with a factory that returns a

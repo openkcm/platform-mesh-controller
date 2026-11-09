@@ -52,12 +52,9 @@ rules:
   - azurerootkeys/finalizers
   - dataencryptionkeys/finalizers
   - domainkeys/finalizers
-  - gcprootkeys/status
-  - hsmrootkeys/status
   - openbaorootkeys/finalizers
   - servicekeys/finalizers
   - tenants/finalizers
-  - vaultrootkeys/status
   verbs:
   - update
 - apiGroups:
@@ -77,10 +74,7 @@ rules:
 - apiGroups:
   - operations.openkcm.io
   resources:
-  - gcprootkeys
-  - hsmrootkeys
   - l1keyaccesses
-  - vaultrootkeys
   verbs:
   - create
   - get
