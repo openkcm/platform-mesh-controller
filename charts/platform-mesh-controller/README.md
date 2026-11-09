@@ -73,6 +73,7 @@ kubectl -n platform-mesh-controller-system logs deployment/platform-mesh-control
 | `operations.apiExportEndpointSliceName` | `operations.openkcm.io` | The APIExportEndpointSlice of the APIExport |
 | `tenantNamespace` | `default` | Namespace of the Tenant and keys in each account workspace |
 | `krypton.grpcAddr` | `""` | Krypton's gRPC API; empty: the mock API |
+| `krypton.tls` | `false` | TLS to `krypton.grpcAddr`, verified against the CA certificates of the image |
 | `openkcmAPI.url` | the in-pod mock API | OpenKCM API of the root key reconcilers |
 | `l1Authorization.enabled` | `false` | Serve the L1 access webhook; it allows every review |
 | `l1Authorization.ingress.host` | `""` | Host of `https://<host>/validate-l1-access`, with `ingress.enabled` |
@@ -84,11 +85,12 @@ kubectl -n platform-mesh-controller-system logs deployment/platform-mesh-control
 | From the controller to | Configured by | Transport |
 | --- | --- | --- |
 | kcp | `kcpKubeconfig.secretName` | As in the kubeconfig |
-| Krypton | `krypton.grpcAddr` | Plaintext gRPC: inside a service mesh with mutual TLS |
+| Krypton | `krypton.grpcAddr` | Plaintext gRPC inside a service mesh with mutual TLS, or TLS with `krypton.tls` |
 | OpenKCM API | `openkcmAPI.url` | HTTP(S) as in the URL |
 | Kubernetes API of the hosting cluster | ServiceAccount token | The mock API's state ConfigMap |
 
-With `networkPolicy.enabled`, add the port of Krypton (8080) to `networkPolicy.egress`.
+With `networkPolicy.enabled`, add the port of a plaintext Krypton (8080) to `networkPolicy.egress`.
+The default egress already allows 443 for `krypton.tls`.
 
 ## Security defaults
 
@@ -123,6 +125,8 @@ of a new release with `kubectl apply -f charts/platform-mesh-controller/crds/`.
 | Log `Failed to load KCP kubeconfig` | The Secret has no key `kubeconfig` |
 | Log `Failed to create operations APIExport provider` | The kubeconfig does not point to the provider workspace, or `operations.apiExportEndpointSliceName` is wrong |
 | Log `Failed to connect to Krypton` | `krypton.grpcAddr` is not a valid `host:port` |
+| Krypton calls fail with `connection reset by peer` | `krypton.grpcAddr` is a TLS gateway and `krypton.tls` is false |
+| Krypton calls fail with `missing selected ALPN property` | The TLS gateway does not offer HTTP/2; enable `h2` on it, or set `GRPC_ENFORCE_ALPN_ENABLED=false` in `extraEnv` |
 | Keys stay in the mock after a restart of the pod | Expected without `krypton.grpcAddr`; the mock keeps its state in the ConfigMap `openkcm-mock-state` |
 
 ## Uninstall

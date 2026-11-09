@@ -224,6 +224,7 @@ krypton:
   # plaintext: use it inside a service mesh with mutual TLS, to a root node without
   # `config.auth`. Empty: the mock API.
   grpcAddr: ""
+  tls: false
 
 l1Authorization:
   # -- Serve the L1 access webhook that the ValidatingWebhookConfiguration of the OpenKCM

@@ -57,6 +57,9 @@ spec:
             - --openkcm-api-url={{ .Values.openkcmAPI.url }}
             {{- with .Values.krypton.grpcAddr }}
             - --krypton-grpc-addr={{ . }}
+            {{- if $.Values.krypton.tls }}
+            - --krypton-tls
+            {{- end }}
             {{- end }}
             {{- if .Values.l1Authorization.enabled }}
             - --l1-admission-bind-address=:{{ .Values.l1Authorization.port }}
