@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0 (2026-11-09)
+
+## What's Changed
+* feat: connect to Krypton over TLS by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/60
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.12.3...v0.13.0
+
 ## 0.12.3 (2026-11-05)
 
 ## What's Changed
