@@ -45,14 +45,14 @@ import (
 //
 // v0.9.1 revisits the v0.7.3 "Tenant-only" choice. Since v0.8.5 enforces L2
 // singleton and v0.9.1 makes primaryRootKeyRef optional, the bootstrap can
-// safely create the singleton DomainKey without a primary L1 attached — the
+// safely create the singleton DomainKey without a primary L1 attached - the
 // DomainKey reconciler will sit in Ready=False/AwaitingPrimaryRootKey until
 // the user registers a Root Key and edits the DomainKey to link it (via the
 // Edit affordance in the EncryptionDomainCard).
 type AccountBootstrapReconciler struct {
 	Manager mcmanager.Manager
 
-	// Defaults applied when minting a new Tenant CR. Optional — if all
+	// Defaults applied when minting a new Tenant CR. Optional - if all
 	// empty, the Tenant ships with no OIDCProvider block (the v0.7.0
 	// schema makes oidcProvider optional).
 	DefaultRegion        string
@@ -77,11 +77,6 @@ const (
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=l1keyaccesses,verbs=get;create
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys;azurerootkeys;gcprootkeys,verbs=create
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=hsmrootkeys;vaultrootkeys;openbaorootkeys,verbs=create
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys;hsmrootkeys;vaultrootkeys,verbs=get
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys/status;hsmrootkeys/status,verbs=update
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=vaultrootkeys/status,verbs=update
 
 // Reconcile fires when an account workspace creates/binds operations.openkcm.io.
 func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -117,7 +112,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	if err != nil {
 		// Workspaces that are mid-deletion lose their LogicalCluster before
 		// their APIBindings finish draining. Treat NotFound as "skip", not
-		// "error" — there's nothing to bootstrap in a workspace that's
+		// "error" - there's nothing to bootstrap in a workspace that's
 		// going away.
 		if apierrors.IsNotFound(err) {
 			logger.V(1).Info("LogicalCluster missing; workspace is likely terminating, skipping", "binding", binding.Name)
@@ -137,7 +132,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	// provider-syncagent typically lacks cluster-scope rights to create
 	// namespaces in fresh account workspaces; that's OK as long as
 	// "default" already exists (which is the common case under KCP).
-	// Ignore AlreadyExists and Forbidden — if the namespace genuinely
+	// Ignore AlreadyExists and Forbidden - if the namespace genuinely
 	// doesn't exist, the subsequent Tenant/DomainKey create will return
 	// a clear error.
 	ns := &corev1.Namespace{Name: namespace}
@@ -149,9 +144,6 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 		return ctrl.Result{}, err
 	}
 	if err := ensureL1KeyAccess(ctx, cl); err != nil {
-		return ctrl.Result{}, err
-	}
-	if err := ensureRootKeySlots(ctx, cl, namespace, accountName); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.ensureDomainKey(ctx, cl, namespace, accountName); err != nil {
@@ -174,48 +166,6 @@ func ensureL1KeyAccess(ctx context.Context, cl client.Client) error {
 	}
 	marker.Name = operationsv1alpha1.L1KeyAccessName
 	return client.IgnoreAlreadyExists(cl.Create(ctx, marker))
-}
-
-func ensureRootKeySlots(ctx context.Context, cl client.Client, namespace, accountName string) error {
-	for _, slot := range rootKeySlots(accountName) {
-		slot.SetNamespace(namespace)
-		if err := client.IgnoreAlreadyExists(cl.Create(ctx, slot)); err != nil {
-			return err
-		}
-		if err := markUnreconciledSlot(ctx, cl, slot); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func rootKeySlots(accountName string) []client.Object {
-	return []client.Object{
-		&operationsv1alpha1.AWSRootKey{
-			Name: awsSlotName,
-			Spec: operationsv1alpha1.AWSRootKeySpec{Configured: new(false), TenantNameRef: accountName},
-		},
-		&operationsv1alpha1.AzureRootKey{
-			Name: azureSlotName,
-			Spec: operationsv1alpha1.AzureRootKeySpec{Configured: new(false), TenantNameRef: accountName},
-		},
-		&operationsv1alpha1.GCPRootKey{
-			Name: gcpSlotName,
-			Spec: operationsv1alpha1.GCPRootKeySpec{Configured: new(false), TenantNameRef: accountName},
-		},
-		&operationsv1alpha1.HSMRootKey{
-			Name: hsmSlotName,
-			Spec: operationsv1alpha1.HSMRootKeySpec{Configured: new(false), TenantNameRef: accountName},
-		},
-		&operationsv1alpha1.VaultRootKey{
-			Name: vaultSlotName,
-			Spec: operationsv1alpha1.VaultRootKeySpec{Configured: new(false), TenantNameRef: accountName},
-		},
-		&operationsv1alpha1.OpenBaoRootKey{
-			Name: openBaoSlotName,
-			Spec: operationsv1alpha1.OpenBaoRootKeySpec{Configured: new(false), TenantNameRef: accountName},
-		},
-	}
 }
 
 func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client.Client, namespace, accountName string) error {
@@ -256,7 +206,7 @@ func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client
 
 // ensureDomainKey idempotently creates the singleton Encryption Domain
 // (L2 DomainKey) for this account. The auto-created DomainKey ships
-// with no primaryRootKeyRef — DomainKeyReconciler sits in
+// with no primaryRootKeyRef - DomainKeyReconciler sits in
 // Ready=False/AwaitingPrimaryRootKey until the user links a Root Key
 // via the Edit affordance in the OpenKCM UI.
 func (r *AccountBootstrapReconciler) ensureDomainKey(ctx context.Context, cl client.Client, namespace, accountName string) error {
@@ -278,7 +228,7 @@ func (r *AccountBootstrapReconciler) ensureDomainKey(ctx context.Context, cl cli
 		Spec: operationsv1alpha1.DomainKeySpec{
 			Type:          domainKeyTypeTeam,
 			TenantNameRef: accountName,
-			// PrimaryRootKeyRef intentionally left nil — user links it later.
+			// PrimaryRootKeyRef intentionally left nil - user links it later.
 		},
 	}
 	if err := cl.Create(ctx, dk); err != nil {
