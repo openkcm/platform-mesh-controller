@@ -100,6 +100,19 @@ type SecretKeyReference struct {
 	Key string `json:"key"`
 }
 
+// SecretReference points at a Secret by name and namespace, without naming a
+// key inside it. Use SecretKeyReference when a single data key is meant.
+type SecretReference struct {
+	// Name of the Secret.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Namespace the Secret lives in.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+}
+
 // IdentityInfo carries the upstream identity that OpenKCM established with
 // the backing KMS or key store. Populated by L1 reconcilers once federation
 // succeeds; relayed up the chain by L2/L3/L4 for diagnostics.

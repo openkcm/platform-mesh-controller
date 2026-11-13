@@ -32,9 +32,9 @@ spec:
       type: date
     name: v1alpha1
     schema:
-      description: 'AWSRootKey is an L1 root-key binding to an AWS KMS key, federated via
+      description: 'AWSRootKey is an L1 root-key binding to an AWS KMS key, reached with the
 
-        IAM Roles Anywhere. Referenced from DomainKey.spec.primaryRootKeyRef
+        customer''s IAM access key. Referenced from DomainKey.spec.primaryRootKeyRef
 
         or fallbackRootKeyRefs.'
       properties:
@@ -63,6 +63,56 @@ spec:
         spec:
           description: spec defines the desired state of AWSRootKey
           properties:
+            auth:
+              description: 'Auth is how Krypton authenticates to the customer''s AWS account. It is
+
+                required while the root key is configured (see the validation on the
+
+                spec) and empty only for an empty provider slot.'
+              properties:
+                accessKey:
+                  description: AccessKey is set when Method is AccessKey.
+                  properties:
+                    roleArn:
+                      description: 'RoleARN is the ARN of the IAM role the access key''s user assumes to
+
+                        reach the KMS key.'
+                      minLength: 1
+                      type: string
+                    secretRef:
+                      description: 'SecretRef points at the Secret awsrootkey-<metadata.name>, in the same
+
+                        namespace, with the entries accessKeyId and secretAccessKey. The Secret is
+
+                        created after this resource and carries an ownerReference to it.'
+                      properties:
+                        name:
+                          description: Name of the Secret.
+                          minLength: 1
+                          type: string
+                        namespace:
+                          description: Namespace the Secret lives in.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                  required:
+                  - roleArn
+                  - secretRef
+                  type: object
+                method:
+                  description: Method is the authentication method. AccessKey is the only one.
+                  enum:
+                  - AccessKey
+                  type: string
+              required:
+              - method
+              type: object
+              x-kubernetes-validations:
+              - message: accessKey is required when method is AccessKey
+                rule: self.method != 'AccessKey' || has(self.accessKey)
             configured:
               default: true
               description: Configured is false for an empty provider slot. Legacy resources default to true.
@@ -93,23 +143,6 @@ spec:
               description: ResetRequest identifies an operator reset requested by the role holder.
               maxLength: 128
               type: string
-            rolesAnywhere:
-              description: RolesAnywhere is the Roles Anywhere federation configuration.
-              properties:
-                profileArn:
-                  description: ProfileARN is the ARN of the AWS Roles Anywhere profile.
-                  type: string
-                roleArn:
-                  description: RoleARN is the ARN of the IAM role assumed via Roles Anywhere.
-                  type: string
-                trustAnchorArn:
-                  description: TrustAnchorARN is the ARN of the AWS Roles Anywhere trust anchor.
-                  type: string
-              required:
-              - profileArn
-              - roleArn
-              - trustAnchorArn
-              type: object
             tenantNameRef:
               description: 'TenantNameRef is the account-name of the owning Tenant (sibling in
 
@@ -121,8 +154,8 @@ spec:
           - tenantNameRef
           type: object
           x-kubernetes-validations:
-          - message: Configured slots require non-empty provider parameters
-            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region) && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.trustAnchorArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.profileArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.roleArn.size() > 0))'
+          - message: A configured root key requires tenantNameRef, region, keyUri and auth
+            rule: '!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region) && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size() > 0) && has(self.auth))'
         status:
           description: status defines the observed state of AWSRootKey
           properties:

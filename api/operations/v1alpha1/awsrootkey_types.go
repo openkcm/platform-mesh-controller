@@ -22,22 +22,44 @@ import (
 	"github.com/openkcm/platform-mesh-controller/api/shared"
 )
 
-// AWSRolesAnywhereConfig captures the IAM Roles Anywhere federation
-// configuration used to authenticate to AWS KMS via X.509 client certs.
-type AWSRolesAnywhereConfig struct {
-	// TrustAnchorARN is the ARN of the AWS Roles Anywhere trust anchor.
+// AWSAuthMethod names how Krypton authenticates to the customer's AWS account.
+// +kubebuilder:validation:Enum=AccessKey
+type AWSAuthMethod string
+
+// AWSAuthMethodAccessKey is a long-lived access key (ID and secret) of an IAM
+// user that may only assume AWSAccessKeyAuth.RoleARN.
+const AWSAuthMethodAccessKey AWSAuthMethod = "AccessKey"
+
+// AWSAccessKeyAuth holds what the AccessKey method needs besides the key
+// itself. The access key ID and the secret access key are never part of the
+// resource: they live in the Secret that SecretRef names.
+type AWSAccessKeyAuth struct {
+	// RoleARN is the ARN of the IAM role the access key's user assumes to
+	// reach the KMS key.
 	// +required
-	TrustAnchorARN string `json:"trustAnchorArn"`
-	// ProfileARN is the ARN of the AWS Roles Anywhere profile.
-	// +required
-	ProfileARN string `json:"profileArn"`
-	// RoleARN is the ARN of the IAM role assumed via Roles Anywhere.
-	// +required
+	// +kubebuilder:validation:MinLength=1
 	RoleARN string `json:"roleArn"`
+	// SecretRef points at the Secret awsrootkey-<metadata.name>, in the same
+	// namespace, with the entries accessKeyId and secretAccessKey. The Secret is
+	// created after this resource and carries an ownerReference to it.
+	// +required
+	SecretRef shared.SecretReference `json:"secretRef"`
+}
+
+// AWSAuth selects the authentication method and carries the block of that
+// method.
+// +kubebuilder:validation:XValidation:rule="self.method != 'AccessKey' || has(self.accessKey)",message="accessKey is required when method is AccessKey"
+type AWSAuth struct {
+	// Method is the authentication method. AccessKey is the only one.
+	// +required
+	Method AWSAuthMethod `json:"method"`
+	// AccessKey is set when Method is AccessKey.
+	// +optional
+	AccessKey *AWSAccessKeyAuth `json:"accessKey,omitempty"`
 }
 
 // AWSRootKeySpec defines the desired state of AWSRootKey.
-// +kubebuilder:validation:XValidation:rule="!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region) && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.trustAnchorArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.profileArn.size() > 0) && (has(self.rolesAnywhere) && self.rolesAnywhere.roleArn.size() > 0))",message="Configured slots require non-empty provider parameters"
+// +kubebuilder:validation:XValidation:rule="!self.configured || (self.tenantNameRef.size() > 0 && (has(self.region) && self.region.size() > 0) && (has(self.keyUri) && self.keyUri.size() > 0) && has(self.auth))",message="A configured root key requires tenantNameRef, region, keyUri and auth"
 type AWSRootKeySpec struct {
 	// Configured is false for an empty provider slot. Legacy resources default to true.
 	// +optional
@@ -64,9 +86,11 @@ type AWSRootKeySpec struct {
 	// +optional
 	EndpointURL string `json:"endpointUrl,omitempty"`
 
-	// RolesAnywhere is the Roles Anywhere federation configuration.
+	// Auth is how Krypton authenticates to the customer's AWS account. It is
+	// required while the root key is configured (see the validation on the
+	// spec) and empty only for an empty provider slot.
 	// +optional
-	RolesAnywhere AWSRolesAnywhereConfig `json:"rolesAnywhere,omitzero"`
+	Auth *AWSAuth `json:"auth,omitempty"`
 
 	// Lifecycle is the user-desired key lifecycle. Defaults to Active.
 	// Setting to Deactivated triggers a deactivation roundtrip via the
@@ -118,8 +142,8 @@ type AWSRootKeyStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// AWSRootKey is an L1 root-key binding to an AWS KMS key, federated via
-// IAM Roles Anywhere. Referenced from DomainKey.spec.primaryRootKeyRef
+// AWSRootKey is an L1 root-key binding to an AWS KMS key, reached with the
+// customer's IAM access key. Referenced from DomainKey.spec.primaryRootKeyRef
 // or fallbackRootKeyRefs.
 type AWSRootKey struct {
 	metav1.TypeMeta `json:",inline"`

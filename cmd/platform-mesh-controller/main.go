@@ -215,6 +215,7 @@ func main() {
 	var tenantBackend operationscontroller.TenantBackend = apiClient
 	var keyBackend operationscontroller.KeyBackend = apiClient
 	var dataEncryptionKeyBackend operationscontroller.DataEncryptionKeyBackend = apiClient
+	var awsRootKeyBackend operationscontroller.AWSRootKeyBackend = apiClient
 	if kryptonAddr != "" {
 		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(kryptonCredentials(kryptonTLS)))
 		if err != nil {
@@ -226,7 +227,8 @@ func main() {
 		kryptonBackend := kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
 		keyBackend = kryptonBackend
 		dataEncryptionKeyBackend = kryptonBackend
-		setupLog.Info("Tenant, DomainKey, ServiceKey and DataEncryptionKey reconciliation bound to Krypton",
+		awsRootKeyBackend = kryptongrpc.NewRootKeyBackend(conn)
+		setupLog.Info("Tenant, DomainKey, ServiceKey, DataEncryptionKey and AWSRootKey reconciliation bound to Krypton",
 			"addr", kryptonAddr)
 	}
 
@@ -310,7 +312,7 @@ func main() {
 	}
 
 	if err := (&operationscontroller.AWSRootKeyReconciler{
-		APIClient:        apiClient,
+		APIClient:        awsRootKeyBackend,
 		AccountNamespace: tenantNamespace,
 	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "AWSRootKey")

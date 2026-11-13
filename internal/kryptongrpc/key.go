@@ -91,6 +91,25 @@ func (c *KeyClient) ActivateKey(ctx context.Context, id string, tenantID string)
 	}, nil
 }
 
+func (c *KeyClient) DeactivateKey(ctx context.Context, id string, tenantID string) (*openkcmapi.ActivateKeyResponse, error) {
+	_, err := c.keys.DeactivateKey(ctx, &kryptonkeys.DeactivateKeyRequest{
+		Id:       id,
+		TenantId: tenantID,
+	})
+	if err != nil {
+		return nil, translate("DeactivateKey", err)
+	}
+
+	got, err := c.GetKey(ctx, id, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return &openkcmapi.ActivateKeyResponse{
+		ID:             got.ID,
+		LifecycleState: got.LifecycleState,
+	}, nil
+}
+
 func processingState(key *kryptonkeys.Key) string {
 	status := key.GetKeyProcessingState().GetStatus()
 	if status == kryptonProcessingCompleted {
