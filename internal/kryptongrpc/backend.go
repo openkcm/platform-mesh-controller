@@ -42,8 +42,8 @@ type Backend struct {
 	rootName string
 }
 
-// BackendOptions translates a controller key level ("L2") to a Krypton kind
-// ("K1") and names the tenant root that parents domain keys.
+// BackendOptions maps a controller key level to a Krypton kind and names the
+// tenant root that parents domain keys.
 type BackendOptions struct {
 	KindMap  map[string]string
 	RootKind string
@@ -51,15 +51,15 @@ type BackendOptions struct {
 }
 
 // NewBackend wraps an established gRPC connection. Empty options expect Krypton's
-// root segment to serve K1 and K2 as KEKs and K3 as DEKs, without agents.
+// root segment to serve L2 and L3 as KEKs and L4 as DEKs, without agents.
 func NewBackend(conn grpc.ClientConnInterface, opts BackendOptions) *Backend {
 	kindMap := opts.KindMap
 	if len(kindMap) == 0 {
-		kindMap = map[string]string{"L2": "K1", "L3": "K2", dataEncryptionKeyLevel: "K3"}
+		kindMap = map[string]string{"L2": "L2", "L3": "L3", dataEncryptionKeyLevel: "L4"}
 	}
 	rootKind := opts.RootKind
 	if rootKind == "" {
-		rootKind = "K0"
+		rootKind = "L1"
 	}
 	rootName := opts.RootName
 	if rootName == "" {

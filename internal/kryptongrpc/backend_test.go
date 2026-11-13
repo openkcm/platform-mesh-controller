@@ -128,12 +128,12 @@ func TestBackendCreateKeySeedsRootAndPacksTenant(t *testing.T) {
 	require.NoError(t, err, "CreateKey")
 	assert.Equal(t, "tenant-1/key-2", resp.ID, "packed id")
 
-	// the root (K0) was announced and activated before the domain key (K1)
+	// the root (L1) was announced and activated before the domain key (L2)
 	require.Len(t, srv.announceLog, 2, "announced keys, want 2 (root + domain)")
-	assert.Equal(t, "K0", srv.announceLog[0].GetKind(), "first announce kind, want K0 with no parent")
-	assert.Empty(t, srv.announceLog[0].GetParentId(), "first announce parent, want K0 with no parent")
-	assert.Equal(t, "K1", srv.announceLog[1].GetKind(), "second announce kind, want K1 under key-1")
-	assert.Equal(t, "key-1", srv.announceLog[1].GetParentId(), "second announce parent, want K1 under key-1")
+	assert.Equal(t, "L1", srv.announceLog[0].GetKind(), "first announce kind, want L1 with no parent")
+	assert.Empty(t, srv.announceLog[0].GetParentId(), "first announce parent, want L1 with no parent")
+	assert.Equal(t, "L2", srv.announceLog[1].GetKind(), "second announce kind, want L2 under key-1")
+	assert.Equal(t, "key-1", srv.announceLog[1].GetParentId(), "second announce parent, want L2 under key-1")
 	assert.Equal(t, []string{"key-1"}, srv.activateSeen, "activated, want only the root key-1")
 }
 
@@ -160,7 +160,7 @@ func TestBackendCreateKeyUnderParent(t *testing.T) {
 	require.NoError(t, err, "CreateKey service key")
 	assert.Equal(t, testKeyTenantID+"/key-3", service.ID, "packed id")
 	require.Len(t, srv.announceLog, 3, "announced keys, want root, domain and service")
-	assert.Equal(t, "K2", srv.announceLog[2].GetKind(), "service key kind")
+	assert.Equal(t, "L3", srv.announceLog[2].GetKind(), "service key kind")
 	assert.Equal(t, "key-2", srv.announceLog[2].GetParentId(), "service key parent")
 }
 
@@ -186,7 +186,7 @@ func TestBackendCreateDEKUnderServiceKey(t *testing.T) {
 	require.NoError(t, err, "CreateDEK")
 	assert.Equal(t, testKeyTenantID+"/key-4", dek.ID, "packed id")
 	require.Len(t, srv.announceLog, 4, "announced keys, want root, domain, service and data encryption key")
-	assert.Equal(t, "K3", srv.announceLog[3].GetKind(), "data encryption key kind")
+	assert.Equal(t, "L4", srv.announceLog[3].GetKind(), "data encryption key kind")
 	assert.Equal(t, "key-3", srv.announceLog[3].GetParentId(), "data encryption key parent")
 	got, err := b.GetDEK(t.Context(), dek.ID)
 	require.NoError(t, err, "GetDEK")
@@ -238,7 +238,7 @@ func TestBackendReusesRootAcrossKeys(t *testing.T) {
 	// then the root is announced again by name but not re-activated
 	roots := 0
 	for _, a := range srv.announceLog {
-		if a.GetKind() == "K0" {
+		if a.GetKind() == "L1" {
 			roots++
 		}
 	}
