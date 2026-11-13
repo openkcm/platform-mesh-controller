@@ -197,6 +197,11 @@ func (e *APIError) Retryable() bool {
 	return e.kind == KindNotReady || e.kind == KindTransient || e.kind == KindUnknown
 }
 
+func IsNotImplemented(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotImplemented
+}
+
 func kindForStatus(status int) Kind {
 	switch status {
 	case http.StatusNotFound:
@@ -371,6 +376,10 @@ func (c *Client) DeleteRootKey(ctx context.Context, id string) error {
 	if err := c.doRequest(ctx, http.MethodDelete, "/rootkeys/"+id, nil, nil); err != nil {
 		return fmt.Errorf("delete root key: %w", err)
 	}
+	return nil
+}
+
+func (c *Client) BindAWSProvider(context.Context, string, AWSProvider) error {
 	return nil
 }
 

@@ -40,12 +40,13 @@ import (
 type testKeyServer struct {
 	kryptonkeys.UnimplementedKeyServiceServer
 
-	mu           sync.Mutex
-	byName       map[string]*kryptonkeys.Key
-	byID         map[string]*kryptonkeys.Key
-	seq          int
-	announceLog  []*kryptonkeys.AnnounceKeyRequest
-	activateSeen []string
+	mu             sync.Mutex
+	byName         map[string]*kryptonkeys.Key
+	byID           map[string]*kryptonkeys.Key
+	seq            int
+	announceLog    []*kryptonkeys.AnnounceKeyRequest
+	activateSeen   []string
+	deactivateSeen []string
 }
 
 func newTestKeyServer() *testKeyServer {
@@ -105,6 +106,19 @@ func (s *testKeyServer) ActivateKey(
 		key.LifeCycleState = kryptongrpc.KryptonKeyLifecycleActive
 	}
 	return &kryptonkeys.ActivateKeyResponse{}, nil
+}
+
+func (s *testKeyServer) DeactivateKey(
+	_ context.Context, req *kryptonkeys.DeactivateKeyRequest,
+) (*kryptonkeys.DeactivateKeyResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.deactivateSeen = append(s.deactivateSeen, req.GetId())
+	if key, ok := s.byID[req.GetTenantId()+"|"+req.GetId()]; ok {
+		key.LifeCycleState = kryptongrpc.KryptonKeyLifecycleDeactivated
+	}
+	return &kryptonkeys.DeactivateKeyResponse{}, nil
 }
 
 func newBackendAgainst(t *testing.T, srv *testKeyServer) *kryptongrpc.Backend {
@@ -274,10 +288,22 @@ func TestBackendRejectsMalformedID(t *testing.T) {
 	require.Error(t, err, "a key id without a tenant must be rejected")
 }
 
+func TestBackendDeactivateKey(t *testing.T) {
+	srv := newTestKeyServer()
+	b := newBackendAgainst(t, srv)
+	created, err := b.CreateKey(t.Context(), openkcmapi.CreateKeyRequest{TenantID: "tid", Kind: "L2", Name: "k"})
+	require.NoError(t, err, "CreateKey")
+	_, err = b.ActivateKey(t.Context(), created.ID)
+	require.NoError(t, err, "ActivateKey")
+
+	deact, err := b.DeactivateKey(t.Context(), created.ID)
+	require.NoError(t, err, "DeactivateKey")
+	assert.Equal(t, string(shared.LifecycleDeactivated), deact.LifecycleState, "deactivated lifecycle")
+	assert.Equal(t, created.ID, deact.ID, "opaque id preserved")
+}
+
 func TestBackendKeyOpsUnsupportedByKrypton(t *testing.T) {
 	b := newBackendAgainst(t, newTestKeyServer())
-	_, err := b.DeactivateKey(t.Context(), "t/k")
-	assert.ErrorIs(t, err, errors.ErrUnsupported, "DeactivateKey error")
 	assert.ErrorIs(t, b.DeleteKey(t.Context(), "t/k"), errors.ErrUnsupported, "DeleteKey error")
 	assert.ErrorIs(t, b.DeleteDEK(t.Context(), "t/k"), errors.ErrUnsupported, "DeleteDEK error")
 }

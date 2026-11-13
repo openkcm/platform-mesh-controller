@@ -31,6 +31,7 @@ import (
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
+	"github.com/openkcm/platform-mesh-controller/api/shared"
 	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
@@ -56,6 +57,10 @@ func (b *provisioningBackend) CreateRootKey(
 	b.rootKeyRequests = append(b.rootKeyRequests, req)
 	b.mu.Unlock()
 	return &openkcmapi.CreateRootKeyResponse{ID: "root-key-id", ProcessingState: openkcmapi.ProcessingStateReady}, nil
+}
+
+func (b *provisioningBackend) BindAWSProvider(context.Context, string, openkcmapi.AWSProvider) error {
+	return nil
 }
 
 func (b *provisioningBackend) CreateDEK(
@@ -129,13 +134,34 @@ func newAWSRootKeyForReconciliation() client.Object {
 		TenantNameRef: testAccountName,
 		Region:        "eu-central-1",
 		KeyURI:        "arn:aws:kms:eu-central-1:000000000000:key/root",
-		RolesAnywhere: operationsv1alpha1.AWSRolesAnywhereConfig{
-			TrustAnchorARN: "arn:aws:rolesanywhere:eu-central-1:000000000000:trust-anchor/root",
-			ProfileARN:     "arn:aws:rolesanywhere:eu-central-1:000000000000:profile/root",
-			RoleARN:        "arn:aws:iam::000000000000:role/root",
+		Auth: &operationsv1alpha1.AWSAuth{
+			Method: operationsv1alpha1.AWSAuthMethodAccessKey,
+			AccessKey: &operationsv1alpha1.AWSAccessKeyAuth{
+				RoleARN:   "arn:aws:iam::000000000000:role/root",
+				SecretRef: shared.SecretReference{Name: "awsrootkey-aws-root-key", Namespace: rootKeyReconciliationNamespace},
+			},
 		},
 	}
 	Expect(k8sClient.Create(ctx, rootKey)).To(Succeed())
+
+	secret := &corev1.Secret{}
+	secret.Name = "awsrootkey-aws-root-key"
+	secret.Namespace = rootKeyReconciliationNamespace
+	secret.Labels = map[string]string{"openkcm.io/root-key-credentials": "true"}
+	secret.OwnerReferences = []metav1.OwnerReference{{
+		APIVersion: operationsv1alpha1.GroupVersion.String(),
+		Kind:       "AWSRootKey",
+		Name:       rootKey.Name,
+		UID:        rootKey.UID,
+	}}
+	secret.Data = map[string][]byte{
+		"accessKeyId":     []byte("test-access-key-id"),
+		"secretAccessKey": []byte("test-secret-access-key"),
+	}
+	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+	DeferCleanup(func() {
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, secret))).To(Succeed())
+	})
 	return rootKey
 }
 

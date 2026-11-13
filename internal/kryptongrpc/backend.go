@@ -143,12 +143,20 @@ func (b *Backend) ActivateKey(ctx context.Context, id string) (*openkcmapi.Activ
 	return resp, nil
 }
 
-// DeactivateKey is not offered by Krypton yet.
-func (b *Backend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
-	return nil, fmt.Errorf("DeactivateKey %s: %w", id, errors.ErrUnsupported)
+func (b *Backend) DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	tenantID, keyID, err := unpackKeyID(id)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := b.keys.DeactivateKey(ctx, keyID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	resp.ID = id
+	return resp, nil
 }
 
-// DeleteKey is not offered by Krypton.
+// TODO: Krypton has no key-delete RPC yet, so report unsupported and let the reconciler drop the finalizer.
 func (b *Backend) DeleteKey(_ context.Context, id string) error {
 	return fmt.Errorf("DeleteKey %s: %w", id, errors.ErrUnsupported)
 }
@@ -181,6 +189,7 @@ func (b *Backend) GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResp
 	}, nil
 }
 
+// TODO: Krypton has no key-delete RPC yet, so report unsupported and let the reconciler drop the finalizer.
 func (b *Backend) DeleteDEK(_ context.Context, id string) error {
 	return fmt.Errorf("DeleteDEK %s: %w", id, errors.ErrUnsupported)
 }
