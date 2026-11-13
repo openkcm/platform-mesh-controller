@@ -143,9 +143,17 @@ func (b *Backend) ActivateKey(ctx context.Context, id string) (*openkcmapi.Activ
 	return resp, nil
 }
 
-// DeactivateKey is not offered by Krypton yet.
-func (b *Backend) DeactivateKey(_ context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
-	return nil, fmt.Errorf("DeactivateKey %s: %w", id, errors.ErrUnsupported)
+func (b *Backend) DeactivateKey(ctx context.Context, id string) (*openkcmapi.ActivateKeyResponse, error) {
+	tenantID, keyID, err := unpackKeyID(id)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := b.keys.DeactivateKey(ctx, keyID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	resp.ID = id
+	return resp, nil
 }
 
 // DeleteKey is not offered by Krypton.
