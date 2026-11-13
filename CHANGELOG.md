@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.1 (2026-11-13)
+
+## What's Changed
+* fix: adapt Krypton key kinds to the L1-L4 configuration by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/66
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.14.0...v0.14.1
+
 ## 0.14.0 (2026-11-09)
 
 ## What's Changed
