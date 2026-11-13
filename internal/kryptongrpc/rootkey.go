@@ -25,7 +25,7 @@ import (
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
-const defaultRootKeyKind = "K0"
+const defaultRootKeyKind = "L1"
 
 type RootKeyBackend struct {
 	keys      *KeyClient
