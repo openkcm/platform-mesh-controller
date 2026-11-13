@@ -57,37 +57,37 @@ func TestKeyClientAgainstLiveKrypton(t *testing.T) {
 	tenant, err := tenants.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: tag})
 	require.NoError(t, err, "CreateTenant")
 
-	// when the root (K0) is announced and activated
+	// when the root (L1) is announced and activated
 	root, err := keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
-		TenantID: tenant.ID, Kind: "K0", Name: "root-" + tag,
+		TenantID: tenant.ID, Kind: "L1", Name: "root-" + tag,
 	})
-	require.NoError(t, err, "AnnounceKey K0")
-	require.Equal(t, openkcmapi.ProcessingStateReady, root.ProcessingState, "K0 processing")
+	require.NoError(t, err, "AnnounceKey L1")
+	require.Equal(t, openkcmapi.ProcessingStateReady, root.ProcessingState, "L1 processing")
 	_, err = keys.ActivateKey(ctx, root.ID, tenant.ID)
-	require.NoError(t, err, "ActivateKey K0")
+	require.NoError(t, err, "ActivateKey L1")
 
-	// and the domain key (K1) is announced under it and activated
+	// and the domain key (L2) is announced under it and activated
 	kek, err := keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
-		TenantID: tenant.ID, Kind: "K1", Name: "kek-" + tag, ParentID: root.ID,
+		TenantID: tenant.ID, Kind: "L2", Name: "kek-" + tag, ParentID: root.ID,
 	})
-	require.NoError(t, err, "AnnounceKey K1")
+	require.NoError(t, err, "AnnounceKey L2")
 	act, err := keys.ActivateKey(ctx, kek.ID, tenant.ID)
-	require.NoError(t, err, "ActivateKey K1")
+	require.NoError(t, err, "ActivateKey L2")
 
 	// then the read-back state is translated into the controller's vocabulary
-	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated K1 lifecycle")
+	assert.Equal(t, string(shared.LifecycleActive), act.LifecycleState, "activated L2 lifecycle")
 	got, err := keys.GetKey(ctx, kek.ID, tenant.ID)
-	require.NoError(t, err, "GetKey K1")
-	assert.Equal(t, string(shared.LifecycleActive), got.LifecycleState, "K1 lifecycle")
-	assert.Equal(t, openkcmapi.ProcessingStateReady, got.ProcessingState, "K1 processing")
+	require.NoError(t, err, "GetKey L2")
+	assert.Equal(t, string(shared.LifecycleActive), got.LifecycleState, "L2 lifecycle")
+	assert.Equal(t, openkcmapi.ProcessingStateReady, got.ProcessingState, "L2 processing")
 
 	// and a non-root key without a parent is rejected, not silently accepted
 	_, err = keys.AnnounceKey(ctx, openkcmapi.CreateKeyRequest{
-		TenantID: tenant.ID, Kind: "K1", Name: "orphan-" + tag,
+		TenantID: tenant.ID, Kind: "L2", Name: "orphan-" + tag,
 	})
-	require.Error(t, err, "AnnounceKey K1 without a parent must fail")
+	require.Error(t, err, "AnnounceKey L2 without a parent must fail")
 	if !openkcmapi.IsRetryable(err) && !openkcmapi.IsNotFound(err) {
-		t.Logf("orphan K1 rejected as expected: %v", err)
+		t.Logf("orphan L2 rejected as expected: %v", err)
 	}
 }
 
@@ -135,14 +135,14 @@ func TestBackendAgainstLiveKrypton(t *testing.T) {
 	service, err := b.CreateKey(ctx, serviceKeyRequest)
 	require.NoError(t, err, "CreateKey service key")
 
-	// then it lands under the domain key as K2 and activates
+	// then it lands under the domain key as L3 and activates
 	_, serviceKeyID, err := kryptongrpc.UnpackKeyID(service.ID)
 	require.NoError(t, err, "returned service key id is not a packed handle")
 	stored, err := kryptonkeys.NewKeyServiceClient(conn).GetKey(ctx, &kryptonkeys.GetKeyRequest{
 		Id: serviceKeyID, TenantId: tenant.ID,
 	})
 	require.NoError(t, err, "GetKey service key from Krypton")
-	assert.Equal(t, "K2", stored.GetKey().GetKind(), "service key kind")
+	assert.Equal(t, "L3", stored.GetKey().GetKind(), "service key kind")
 	assert.Equal(t, domainKeyID, stored.GetKey().GetParentId(), "service key parent")
 	retried, err := b.CreateKey(ctx, serviceKeyRequest)
 	require.NoError(t, err, "CreateKey service key again")
@@ -157,14 +157,14 @@ func TestBackendAgainstLiveKrypton(t *testing.T) {
 	})
 	require.NoError(t, err, "CreateDEK")
 
-	// then it lands under the service key as K3 and activates
+	// then it lands under the service key as L4 and activates
 	_, dataEncryptionKeyID, err := kryptongrpc.UnpackKeyID(dek.ID)
 	require.NoError(t, err, "returned data encryption key id is not a packed handle")
 	stored, err = kryptonkeys.NewKeyServiceClient(conn).GetKey(ctx, &kryptonkeys.GetKeyRequest{
 		Id: dataEncryptionKeyID, TenantId: tenant.ID,
 	})
 	require.NoError(t, err, "GetKey data encryption key from Krypton")
-	assert.Equal(t, "K3", stored.GetKey().GetKind(), "data encryption key kind")
+	assert.Equal(t, "L4", stored.GetKey().GetKind(), "data encryption key kind")
 	assert.Equal(t, serviceKeyID, stored.GetKey().GetParentId(), "data encryption key parent")
 	act, err = b.ActivateKey(ctx, dek.ID)
 	require.NoError(t, err, "ActivateKey data encryption key")

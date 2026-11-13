@@ -77,7 +77,7 @@ func TestAnnounceKeyTranslatesProcessingState(t *testing.T) {
 			})
 
 			// when
-			resp, err := c.AnnounceKey(t.Context(), openkcmapi.CreateKeyRequest{Name: "domain-key", Kind: "K1"})
+			resp, err := c.AnnounceKey(t.Context(), openkcmapi.CreateKeyRequest{Name: "domain-key", Kind: "L2"})
 
 			// then
 			require.NoError(t, err)
