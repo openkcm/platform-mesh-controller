@@ -21,7 +21,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/openkcm/platform-mesh-controller/internal/kryptongrpc/rootkeypb"
+	kryptonrootkey "github.com/openkcm/krypton/pkg/api/v1/proto/admin/rootkey"
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
@@ -29,14 +29,14 @@ const defaultRootKeyKind = "K0"
 
 type RootKeyBackend struct {
 	keys      *KeyClient
-	providers rootkeypb.ServiceClient
+	providers kryptonrootkey.ServiceClient
 	kind      string
 }
 
 func NewRootKeyBackend(conn grpc.ClientConnInterface) *RootKeyBackend {
 	return &RootKeyBackend{
 		keys:      NewKeyClient(conn),
-		providers: rootkeypb.NewServiceClient(conn),
+		providers: kryptonrootkey.NewServiceClient(conn),
 		kind:      defaultRootKeyKind,
 	}
 }
@@ -105,7 +105,7 @@ func (b *RootKeyBackend) DeleteRootKey(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := b.providers.RemoveProvider(ctx, &rootkeypb.RemoveProviderRequest{
+	if _, err := b.providers.RemoveProvider(ctx, &kryptonrootkey.RemoveProviderRequest{
 		TenantId: tenantID,
 		KeyId:    keyID,
 	}); err != nil {
@@ -119,30 +119,31 @@ func (b *RootKeyBackend) BindAWSProvider(ctx context.Context, id string, provide
 	if err != nil {
 		return err
 	}
-	_, err = b.providers.CreateProvider(ctx, &rootkeypb.CreateProviderRequest{
+	// TODO: Krypton's AwsStaticCredentials carries no role_arn, so provider.RoleARN is not sent;
+	// map it once the contract offers an access-key-assumes-role credential.
+	_, err = b.providers.CreateProvider(ctx, &kryptonrootkey.CreateProviderRequest{
 		TenantId: tenantID,
 		KeyId:    keyID,
-		Config: &rootkeypb.ProviderConfig{
-			Provider: &rootkeypb.ProviderConfig_AwsKms{
-				AwsKms: &rootkeypb.AwsKmsConfig{Region: provider.Region},
+		Config: &kryptonrootkey.ProviderConfig{
+			Provider: &kryptonrootkey.ProviderConfig_AwsKms{
+				AwsKms: &kryptonrootkey.AwsKmsConfig{Region: provider.Region},
 			},
 		},
-		Auth: &rootkeypb.ProviderAuth{
-			Provider: &rootkeypb.ProviderAuth_AwsKms{
-				AwsKms: &rootkeypb.AwsKmsAuth{
-					Credentials: &rootkeypb.AwsKmsAuth_Static{
-						Static: &rootkeypb.AwsStaticCredentials{
+		Auth: &kryptonrootkey.ProviderAuth{
+			Provider: &kryptonrootkey.ProviderAuth_AwsKms{
+				AwsKms: &kryptonrootkey.AwsKmsAuth{
+					Credentials: &kryptonrootkey.AwsKmsAuth_Static{
+						Static: &kryptonrootkey.AwsStaticCredentials{
 							AccessKeyId:     provider.AccessKeyID,
 							SecretAccessKey: provider.SecretAccessKey,
-							RoleArn:         provider.RoleARN,
 						},
 					},
 				},
 			},
 		},
-		ProviderKey: &rootkeypb.ProviderKey{
-			Provider: &rootkeypb.ProviderKey_AwsKms{
-				AwsKms: &rootkeypb.AwsKmsKey{KeyArn: provider.KeyARN},
+		ProviderKey: &kryptonrootkey.ProviderKey{
+			Provider: &kryptonrootkey.ProviderKey_AwsKms{
+				AwsKms: &kryptonrootkey.AwsKmsKey{KeyArn: provider.KeyARN},
 			},
 		},
 	})

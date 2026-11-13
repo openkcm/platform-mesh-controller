@@ -156,7 +156,7 @@ func (b *Backend) DeactivateKey(ctx context.Context, id string) (*openkcmapi.Act
 	return resp, nil
 }
 
-// DeleteKey is not offered by Krypton.
+// TODO: Krypton has no key-delete RPC yet, so report unsupported and let the reconciler drop the finalizer.
 func (b *Backend) DeleteKey(_ context.Context, id string) error {
 	return fmt.Errorf("DeleteKey %s: %w", id, errors.ErrUnsupported)
 }
@@ -189,6 +189,7 @@ func (b *Backend) GetDEK(ctx context.Context, id string) (*openkcmapi.GetDEKResp
 	}, nil
 }
 
+// TODO: Krypton has no key-delete RPC yet, so report unsupported and let the reconciler drop the finalizer.
 func (b *Backend) DeleteDEK(_ context.Context, id string) error {
 	return fmt.Errorf("DeleteDEK %s: %w", id, errors.ErrUnsupported)
 }
