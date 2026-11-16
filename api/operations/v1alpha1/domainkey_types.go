@@ -98,6 +98,8 @@ type DomainKeyStatus struct {
 	// CryptoState represents the Krypton cryptographic business state.
 	// +optional
 	CryptoState *shared.CryptoState `json:"cryptoState,omitempty"`
+	// +optional
+	L1KeyID string `json:"l1KeyId,omitempty"`
 }
 
 // +kubebuilder:object:root=true

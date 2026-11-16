@@ -105,9 +105,11 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		domainKeyState = dk.Status.CryptoState.LifecycleState
 	}
 
-	// Child cannot be more active than parent: if DK is not Active, SK
-	// effective desired collapses to Deactivated regardless of spec.
-	effectiveDesired := effectiveDesiredLifecycle(sk.Spec.Lifecycle, domainKeyState)
+	serviceKeyState := shared.LifecycleState("")
+	if sk.Status.CryptoState != nil {
+		serviceKeyState = sk.Status.CryptoState.LifecycleState
+	}
+	effectiveDesired := effectiveDesiredLifecycle(sk.Spec.Lifecycle, domainKeyState, serviceKeyState)
 	desired := desiredLifecycleState(effectiveDesired)
 	if sk.Status.CryptoState != nil &&
 		sk.Status.CryptoState.LifecycleState == desired &&
@@ -190,9 +192,6 @@ func (r *ServiceKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 				Message:            "ServiceKey deactivated per spec.lifecycle.",
 				ObservedGeneration: sk.Generation,
 			})
-			if err := cascadeDeactivateServiceKey(ctx, cl, sk.Namespace, sk.Name); err != nil {
-				return ctrl.Result{}, err
-			}
 		} else {
 			r.setReady(sk, reasonKeyMaterialBound, "ServiceKey re-activated.")
 		}

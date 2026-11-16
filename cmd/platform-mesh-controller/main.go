@@ -209,13 +209,10 @@ func main() {
 
 	apiClient := openkcmapi.NewClient(openkcmAPIURL)
 
-	// Tenant, DomainKey, ServiceKey and DataEncryptionKey are the slices moved onto Krypton's real gRPC API.
-	// Every other reconciler still speaks the mock's HTTP surface, so both
-	// clients coexist until each slice is migrated in turn.
 	var tenantBackend operationscontroller.TenantBackend = apiClient
 	var keyBackend operationscontroller.KeyBackend = apiClient
 	var dataEncryptionKeyBackend operationscontroller.DataEncryptionKeyBackend = apiClient
-	var awsRootKeyBackend operationscontroller.AWSRootKeyBackend = apiClient
+	var l1KeyBackend operationscontroller.L1KeyBackend = apiClient
 	if kryptonAddr != "" {
 		conn, err := grpc.NewClient(kryptonAddr, grpc.WithTransportCredentials(kryptonCredentials(kryptonTLS)))
 		if err != nil {
@@ -227,8 +224,8 @@ func main() {
 		kryptonBackend := kryptongrpc.NewBackend(conn, kryptongrpc.BackendOptions{})
 		keyBackend = kryptonBackend
 		dataEncryptionKeyBackend = kryptonBackend
-		awsRootKeyBackend = kryptongrpc.NewRootKeyBackend(conn)
-		setupLog.Info("Tenant, DomainKey, ServiceKey, DataEncryptionKey and AWSRootKey reconciliation bound to Krypton",
+		l1KeyBackend = kryptongrpc.NewRootKeyBackend(conn)
+		setupLog.Info("Tenant, DomainKey, ServiceKey and DataEncryptionKey reconciliation bound to Krypton",
 			"addr", kryptonAddr)
 	}
 
@@ -283,13 +280,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&operationscontroller.NamespaceBootstrapReconciler{
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "NamespaceBootstrap")
-		os.Exit(1)
-	}
-
 	if err := (&operationscontroller.TenantReconciler{APIClient: tenantBackend}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)
@@ -297,6 +287,7 @@ func main() {
 
 	if err := (&operationscontroller.DomainKeyReconciler{
 		APIClient:        keyBackend,
+		L1Keys:           l1KeyBackend,
 		AccountNamespace: tenantNamespace,
 	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "DomainKey")
@@ -308,30 +299,6 @@ func main() {
 		AccountNamespace: tenantNamespace,
 	}).SetupWithManager(opsMgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ServiceKey")
-		os.Exit(1)
-	}
-
-	if err := (&operationscontroller.AWSRootKeyReconciler{
-		APIClient:        awsRootKeyBackend,
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "AWSRootKey")
-		os.Exit(1)
-	}
-
-	if err := (&operationscontroller.AzureRootKeyReconciler{
-		APIClient:        apiClient,
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "AzureRootKey")
-		os.Exit(1)
-	}
-
-	if err := (&operationscontroller.OpenBaoRootKeyReconciler{
-		APIClient:        apiClient,
-		AccountNamespace: tenantNamespace,
-	}).SetupWithManager(opsMgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "OpenBaoRootKey")
 		os.Exit(1)
 	}
 

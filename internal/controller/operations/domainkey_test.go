@@ -33,6 +33,7 @@ import (
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 	"github.com/openkcm/platform-mesh-controller/api/shared"
 	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 // domainKeyNamespace isolates these specs: the DomainKey singleton is scoped
@@ -72,8 +73,8 @@ func ensureRegisteredTenant() {
 
 var domainKeyRootCounter int
 
-// newActiveRootKey creates an AWSRootKey already registered and active.
-func newActiveRootKey() *operationsv1alpha1.AWSRootKey {
+// newRootKey creates an AWSRootKey as the UI does: a plain CR with no status.
+func newRootKey() *operationsv1alpha1.AWSRootKey {
 	GinkgoHelper()
 	domainKeyRootCounter++
 
@@ -93,9 +94,6 @@ func newActiveRootKey() *operationsv1alpha1.AWSRootKey {
 		},
 	}
 	Expect(k8sClient.Create(ctx, rk)).To(Succeed())
-
-	rk.Status.CryptoState = &shared.CryptoState{ID: "root-key-id", LifecycleState: shared.LifecycleActive}
-	Expect(k8sClient.Status().Update(ctx, rk)).To(Succeed())
 	return rk
 }
 
@@ -163,6 +161,7 @@ var _ = Describe("DomainKeyReconciler", func() {
 		backend = &testBackend{}
 		reconciler = &operations.DomainKeyReconciler{
 			APIClient:        backend,
+			L1Keys:           backend,
 			Manager:          newTestManager(),
 			AccountNamespace: domainKeyNamespace,
 		}
@@ -189,7 +188,7 @@ var _ = Describe("DomainKeyReconciler", func() {
 
 	It("adds the finalizer before touching the backend", func() {
 		ensureRegisteredTenant()
-		root := newActiveRootKey()
+		root := newRootKey()
 		dk := newDomainKey(root.Name)
 
 		_, err := reconciler.Reconcile(ctx, requestFor(dk))
@@ -199,41 +198,48 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(reloadDomainKey(dk.Name).Finalizers).To(ContainElement(testDomainKeyFinalizer))
 	})
 
-	It("registers and activates the key once its root is active", func() {
+	It("registers its own L1 and the L2 under it, and stays inactive while the L1 has no provider", func() {
 		ensureRegisteredTenant()
-		root := newActiveRootKey()
+		root := newRootKey()
 		dk := newDomainKey(root.Name)
 
 		drive(reconciler, dk, 4)
 
-		Expect(backend.createKeyCalls).To(HaveLen(1))
-		Expect(backend.createKeyCalls[0].TenantID).To(Equal(testTenantID),
-			"the key must be created under the tenant the Tenant reconciler registered")
-		Expect(backend.createKeyCalls[0].Kind).To(Equal("L2"))
-		Expect(backend.activateKeyCalls).To(ContainElement(testKeyID))
+		Expect(backend.createRootKeyCalls).To(ConsistOf(openkcmapi.CreateRootKeyRequest{
+			TenantID: testTenantID,
+			Name:     operations.DomainKeyOpenKCMName(dk) + ".l1",
+		}))
+		Expect(backend.createKeyCalls).To(ConsistOf(openkcmapi.CreateKeyRequest{
+			TenantID: testTenantID,
+			Kind:     "L2",
+			Name:     operations.DomainKeyOpenKCMName(dk),
+			ParentID: testL1KeyID,
+		}))
+		Expect(backend.activateKeyCalls).To(BeEmpty())
 
 		reloaded := reloadDomainKey(dk.Name)
-		Expect(reloaded.Status.CryptoState).NotTo(BeNil())
+		Expect(reloaded.Status.L1KeyID).To(Equal(testL1KeyID))
 		Expect(reloaded.Status.CryptoState.ID).To(Equal(testKeyID))
-		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
+		Expect(reloaded.Status.CryptoState.LifecycleState).To(Equal(shared.LifecyclePreActive))
 		ready := meta.FindStatusCondition(reloaded.Status.Conditions, operations.ReadyType)
 		Expect(ready).NotTo(BeNil())
-		Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		Expect(ready.Reason).To(Equal("Unconfigured"))
 	})
 
-	It("creates the key on the default root when none is linked", func() {
+	It("activates the L2 once its L1 is active", func() {
 		ensureRegisteredTenant()
+		backend.l1Lifecycle = shared.LifecycleActive
 		dk := newDomainKey("")
 
 		drive(reconciler, dk, 4)
 
-		Expect(backend.createKeyCalls).To(HaveLen(1),
-			"an unlinked domain key uses the backend default root, it does not wait")
+		Expect(backend.activateKeyCalls).To(ConsistOf(testKeyID))
 		Expect(reloadDomainKey(dk.Name).Status.CryptoState.LifecycleState).To(Equal(shared.LifecycleActive))
 	})
 
 	It("waits for the tenant to be registered before creating a key", func() {
-		root := newActiveRootKey()
+		root := newRootKey()
 		dk := newDomainKey(root.Name)
 
 		drive(reconciler, dk, 3)
@@ -245,17 +251,17 @@ var _ = Describe("DomainKeyReconciler", func() {
 		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
 	})
 
-	It("waits for a non-active root key instead of registering a key", func() {
+	It("waits while the linked root key does not exist", func() {
 		ensureRegisteredTenant()
-		root := newActiveRootKey()
-		root.Status.CryptoState = &shared.CryptoState{LifecycleState: shared.LifecyclePreActive}
-		Expect(k8sClient.Status().Update(ctx, root)).To(Succeed())
-		dk := newDomainKey(root.Name)
+		dk := newDomainKey("missing-root")
 
 		drive(reconciler, dk, 3)
 
-		Expect(backend.createKeyCalls).To(BeEmpty(),
-			"a linked root that is not active yet blocks the domain key")
+		Expect(backend.createKeyCalls).To(BeEmpty())
+		ready := meta.FindStatusCondition(reloadDomainKey(dk.Name).Status.Conditions, operations.ReadyType)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		Expect(ready.Reason).To(Equal("RootKeyResolutionFailed"))
 	})
 
 	It("drops the finalizer when the backend cannot delete the key", func() {

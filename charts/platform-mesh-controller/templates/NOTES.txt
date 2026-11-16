@@ -18,12 +18,8 @@ Check the pods and the controller's log:
 {{- if not .Values.kcpKubeconfig.secretName }}
 {{- $warnings = append $warnings "kcpKubeconfig.secretName is empty: the pod cannot start. Set the Secret with the kcp kubeconfig." }}
 {{- end }}
-{{- if hasPrefix "http://127.0.0.1" .Values.openkcmAPI.url }}
-{{- if .Values.krypton.grpcAddr }}
-{{- $warnings = append $warnings "openkcmAPI.url is the in-pod mock API: the root key reconcilers (AWS, Azure, OpenBao) do not reach OpenKCM." }}
-{{- else }}
+{{- if and (hasPrefix "http://127.0.0.1" .Values.openkcmAPI.url) (not .Values.krypton.grpcAddr) }}
 {{- $warnings = append $warnings "openkcmAPI.url is the in-pod mock API and krypton.grpcAddr is empty: all reconcilers use the mock. For development and demos only." }}
-{{- end }}
 {{- end }}
 {{- if not .Values.serviceAccount.automountServiceAccountToken }}
 {{- $warnings = append $warnings "serviceAccount.automountServiceAccountToken is false: the mock API cannot keep its state in its ConfigMap and loses it on restart." }}

@@ -24,10 +24,7 @@ const (
 	ReasonDomainKeyInUse    = reasonDomainKeyInUse
 	ReasonFailed            = reasonFailed
 	ReasonProcess           = reasonProcess
-	ReasonUnconfigured      = reasonUnconfigured
 	ServiceKeyFinalizer     = serviceKeyFinalizer
-	SlotStateConfiguring    = slotStateConfiguring
-	SlotStateUnconfigured   = slotStateUnconfigured
 	TenantFinalizer         = tenantFinalizer
 	TenantIDAnnotation      = tenantIDAnnotation
 )
@@ -35,26 +32,19 @@ const (
 type AccountIdentity = accountIdentity
 
 var (
-	AccountNameFromPath                = accountNameFromPath
-	AutoDomainKeyName                  = autoDomainKeyName
-	CascadeDeactivateDomainKey         = cascadeDeactivateDomainKey
-	CascadeDeactivateRootKey           = cascadeDeactivateRootKey
-	CascadeDeactivateServiceKey        = cascadeDeactivateServiceKey
-	DataEncryptionKeyOpenKCMName       = dataEncryptionKeyOpenKCMName
-	DefaultAccountNamespace            = defaultAccountNamespace
-	DomainKeyOpenKCMName               = domainKeyOpenKCMName
-	EffectiveDesiredLifecycle          = effectiveDesiredLifecycle
-	EnsureAutoDomainKeyForNamespace    = ensureAutoDomainKeyForNamespace
-	EnsureAutoDomainKeysForAccountRoot = ensureAutoDomainKeysForAccountRoot
-	EnsureDomainKey                    = (*AccountBootstrapReconciler).ensureDomainKey
-	EnsureTenant                       = (*AccountBootstrapReconciler).ensureTenant
-	EnsureL1KeyAccess                  = ensureL1KeyAccess
-	FindEarlierDomainKey               = (*DomainKeyReconciler).findEarlierDomainKey
-	InstanceDomainKeyTakenBy           = instanceDomainKeyTakenBy
-	IsOperationsAPIBinding             = isOperationsAPIBinding
-	PrimaryRootKeyLifecycle            = (*DomainKeyReconciler).primaryRootKeyLifecycle
-	ResolvePrimaryRootKey              = (*DomainKeyReconciler).resolvePrimaryRootKey
-	ResolveTenantID                    = resolveTenantID
-	RootKeyResolutionFailureResult     = rootKeyResolutionFailureResult
-	ServiceKeyOpenKCMName              = serviceKeyOpenKCMName
+	AccountNameFromPath            = accountNameFromPath
+	DataEncryptionKeyOpenKCMName   = dataEncryptionKeyOpenKCMName
+	DefaultAccountNamespace        = defaultAccountNamespace
+	DomainKeyOpenKCMName           = domainKeyOpenKCMName
+	EffectiveDesiredLifecycle      = effectiveDesiredLifecycle
+	EnsureDomainKey                = (*AccountBootstrapReconciler).ensureDomainKey
+	EnsureTenant                   = (*AccountBootstrapReconciler).ensureTenant
+	EnsureL1KeyAccess              = ensureL1KeyAccess
+	FindEarlierDomainKey           = (*DomainKeyReconciler).findEarlierDomainKey
+	InstanceDomainKeyTakenBy       = instanceDomainKeyTakenBy
+	IsOperationsAPIBinding         = isOperationsAPIBinding
+	ResolvePrimaryRootKey          = (*DomainKeyReconciler).resolvePrimaryRootKey
+	ResolveTenantID                = resolveTenantID
+	RootKeyResolutionFailureResult = rootKeyResolutionFailureResult
+	ServiceKeyOpenKCMName          = serviceKeyOpenKCMName
 )

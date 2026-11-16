@@ -17,6 +17,7 @@ limitations under the License.
 package operations_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -31,12 +32,34 @@ import (
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 	"github.com/openkcm/platform-mesh-controller/api/shared"
 	operations "github.com/openkcm/platform-mesh-controller/internal/controller/operations"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const (
 	dataEncryptionKeyReconciliationNamespace = "dataencryptionkey-reconciliation-specs"
 	dataEncryptionKeyServiceKeyName          = "service-key"
+	provisionedDataEncryptionKeyID           = "data-encryption-key-id"
 )
+
+// provisioningBackend records key-provisioning calls while inheriting the
+// tenant call recording used by the existing reconciler test backend.
+type provisioningBackend struct {
+	testBackend
+	dekRequests []openkcmapi.CreateDEKRequest
+}
+
+func (b *provisioningBackend) CreateDEK(
+	_ context.Context,
+	req openkcmapi.CreateDEKRequest,
+) (*openkcmapi.CreateDEKResponse, error) {
+	b.mu.Lock()
+	b.dekRequests = append(b.dekRequests, req)
+	b.mu.Unlock()
+	return &openkcmapi.CreateDEKResponse{
+		ID:              provisionedDataEncryptionKeyID,
+		ProcessingState: openkcmapi.ProcessingStateReady,
+	}, nil
+}
 
 func ensureDataEncryptionKeyReconciliationNamespace() {
 	GinkgoHelper()

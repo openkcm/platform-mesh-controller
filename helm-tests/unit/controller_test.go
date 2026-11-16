@@ -368,9 +368,8 @@ func TestControllerReleaseNotes(t *testing.T) {
 			args: set(kryptonAddr, openKCMURL),
 		},
 		{
-			name:     "Krypton only",
-			args:     set(kryptonAddr),
-			warnings: []string{"the root key reconcilers (AWS, Azure, OpenBao) do not reach OpenKCM"},
+			name: "Krypton only",
+			args: set(kryptonAddr),
 		},
 		{
 			name:     "two replicas",

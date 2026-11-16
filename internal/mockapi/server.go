@@ -49,6 +49,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,7 +70,7 @@ type tenantRecord struct {
 type keyRecord struct {
 	ID             string
 	TenantID       string
-	Kind           string // "L1:<provider>", "L2", "L3", or "L4"
+	Kind           string // "L1", "L1:<provider>", "L2", "L3", or "L4"
 	Name           string
 	ParentID       string
 	Provider       string
@@ -188,6 +189,8 @@ func NewServer(addr string) *http.Server {
 	mux.HandleFunc("POST /rootkeys", s.createRootKey)
 	mux.HandleFunc("GET /rootkeys/{id}", s.getRootKey)
 	mux.HandleFunc("DELETE /rootkeys/{id}", s.deleteRootKey)
+	mux.HandleFunc("POST /rootkeys/{id}/provider", s.createProvider)
+	mux.HandleFunc("DELETE /rootkeys/{id}/provider", s.removeProvider)
 	mux.HandleFunc("POST /deks", s.createDEK)
 	mux.HandleFunc("GET /deks/{id}", s.getDEK)
 	mux.HandleFunc("DELETE /deks/{id}", s.deleteDEK)
@@ -341,6 +344,12 @@ type createRootKeyRequest struct {
 	Config   map[string]string `json:"config,omitempty"`
 }
 
+type createProviderRequest struct {
+	Provider string            `json:"provider"`
+	Config   map[string]string `json:"config,omitempty"`
+	Auth     map[string]string `json:"auth,omitempty"`
+}
+
 type createDEKRequest struct {
 	TenantID       string            `json:"tenantId"`
 	ServiceKeyID   string            `json:"serviceKeyId"`
@@ -349,15 +358,17 @@ type createDEKRequest struct {
 }
 
 type keyResponse struct {
-	ID              string `json:"id"`
-	TenantID        string `json:"tenantId,omitempty"`
-	Kind            string `json:"kind,omitempty"`
-	Name            string `json:"name,omitempty"`
-	ParentID        string `json:"parentId,omitempty"`
-	Provider        string `json:"provider,omitempty"`
-	ProcessingState string `json:"processingState,omitempty"`
-	LifecycleState  string `json:"lifecycleState,omitempty"`
-	Version         int32  `json:"version,omitempty"`
+	ID              string            `json:"id"`
+	TenantID        string            `json:"tenantId,omitempty"`
+	Kind            string            `json:"kind,omitempty"`
+	Name            string            `json:"name,omitempty"`
+	ParentID        string            `json:"parentId,omitempty"`
+	Provider        string            `json:"provider,omitempty"`
+	Linked          *bool             `json:"linked,omitempty"`
+	Config          map[string]string `json:"config,omitempty"`
+	ProcessingState string            `json:"processingState,omitempty"`
+	LifecycleState  string            `json:"lifecycleState,omitempty"`
+	Version         int32             `json:"version,omitempty"`
 }
 
 const (
@@ -370,14 +381,31 @@ const (
 	processingStateReady = "ready"
 
 	processingStateProcessing = "processing"
+
+	rootKeyShellKind = "L1"
 )
 
+type providerFields struct {
+	config []string
+	auth   []string
+}
+
+var requiredProviderFields = map[string]providerFields{
+	"aws": {
+		config: []string{"region", "keyArn"},
+		auth:   []string{"accessKeyId", "secretAccessKey"},
+	},
+}
+
 func rootKeyKind(provider string) string {
+	if provider == "" {
+		return rootKeyShellKind
+	}
 	return "L1:" + provider
 }
 
 func isRootKeyKind(kind string) bool {
-	return len(kind) > 3 && kind[:3] == "L1:"
+	return kind == rootKeyShellKind || strings.HasPrefix(kind, "L1:")
 }
 
 func validProvider(provider string) bool {
@@ -387,6 +415,50 @@ func validProvider(provider string) bool {
 	default:
 		return false
 	}
+}
+
+func missingProviderField(req createProviderRequest) (string, string) {
+	fields := requiredProviderFields[req.Provider]
+	for _, name := range fields.config {
+		if req.Config[name] == "" {
+			return "missing_config", fmt.Sprintf("config.%s is required for provider %s", name, req.Provider)
+		}
+	}
+	for _, name := range fields.auth {
+		if req.Auth[name] == "" {
+			return "missing_auth", fmt.Sprintf("auth.%s is required for provider %s", name, req.Provider)
+		}
+	}
+	return "", ""
+}
+
+func blocksChildren(state string) bool {
+	switch state {
+	case lifecycleSuspended, lifecycleDeactivated, lifecycleCompromised, lifecycleDestroyed:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *store) keyView(k *keyRecord) keyResponse {
+	view := keyResponse{
+		ID:              k.ID,
+		TenantID:        k.TenantID,
+		Kind:            k.Kind,
+		Name:            k.Name,
+		ParentID:        k.ParentID,
+		Provider:        k.Provider,
+		ProcessingState: s.stateForAge(k.CreatedAt),
+		LifecycleState:  s.effectiveLifecycleState(k),
+		Version:         k.Version,
+	}
+	if isRootKeyKind(k.Kind) {
+		linked := k.Provider != ""
+		view.Linked = &linked
+		view.Config = copyStringMap(k.Config)
+	}
+	return view
 }
 
 func validLifecycleState(state string) bool {
@@ -447,9 +519,29 @@ func (s *store) createKey(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "parent_not_active", "parent L2 key is not Active")
 			return
 		}
-	} else if req.ParentID != "" {
-		writeError(w, http.StatusBadRequest, "unexpected_parent_id", "parentId must not be set for L2 keys")
-		return
+	} else {
+		if req.ParentID == "" {
+			writeError(w, http.StatusBadRequest, "missing_parent_id", "parentId is required for L2 keys")
+			return
+		}
+		parent, ok := s.keys[req.ParentID]
+		if !ok {
+			writeError(w, http.StatusNotFound, "parent_not_found", fmt.Sprintf("parent key %q does not exist", req.ParentID))
+			return
+		}
+		if !isRootKeyKind(parent.Kind) {
+			writeError(w, http.StatusBadRequest, "invalid_parent_kind", "parent key of an L2 key must be an L1 root key")
+			return
+		}
+		if parent.TenantID != req.TenantID {
+			writeError(w, http.StatusBadRequest, "tenant_mismatch", "parent root key belongs to a different tenant")
+			return
+		}
+		if blocksChildren(parent.LifecycleState) {
+			writeError(w, http.StatusConflict, "parent_not_usable",
+				fmt.Sprintf("parent root key %q is %s", req.ParentID, parent.LifecycleState))
+			return
+		}
 	}
 
 	// Idempotent create: same tenant+kind+name+parent -> return existing ID
@@ -512,16 +604,7 @@ func (s *store) getKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, keyResponse{
-		ID:              k.ID,
-		TenantID:        k.TenantID,
-		Kind:            k.Kind,
-		Name:            k.Name,
-		ParentID:        k.ParentID,
-		ProcessingState: s.stateForAge(k.CreatedAt),
-		LifecycleState:  s.effectiveLifecycleState(k),
-		Version:         k.Version,
-	})
+	writeJSON(w, http.StatusOK, s.keyView(k))
 }
 
 func (s *store) createRootKey(w http.ResponseWriter, r *http.Request) {
@@ -534,8 +617,14 @@ func (s *store) createRootKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing_tenant_id", "tenantId is required")
 		return
 	}
-	if !validProvider(req.Provider) {
-		writeError(w, http.StatusBadRequest, "invalid_provider", "provider must be one of aws, azure, openbao, gcp, vault, hsm")
+	if req.Provider != "" && !validProvider(req.Provider) {
+		writeError(w, http.StatusBadRequest, "invalid_provider",
+			"provider must be empty or one of aws, azure, openbao, gcp, vault, hsm")
+		return
+	}
+	if req.Provider == "" && len(req.Config) > 0 {
+		writeError(w, http.StatusBadRequest, "unexpected_config",
+			"config needs a provider; create the provider with POST /rootkeys/{id}/provider")
 		return
 	}
 	if req.Name == "" {
@@ -558,17 +647,7 @@ func (s *store) createRootKey(w http.ResponseWriter, r *http.Request) {
 		Name:     req.Name,
 	}
 	if existingID, ok := s.keysByKey[dedup]; ok {
-		k := s.keys[existingID]
-		writeJSON(w, http.StatusAccepted, keyResponse{
-			ID:              existingID,
-			TenantID:        k.TenantID,
-			Kind:            k.Kind,
-			Name:            k.Name,
-			Provider:        k.Provider,
-			ProcessingState: s.stateForAge(k.CreatedAt),
-			LifecycleState:  s.effectiveLifecycleState(k),
-			Version:         k.Version,
-		})
+		writeJSON(w, http.StatusAccepted, s.keyView(s.keys[existingID]))
 		return
 	}
 
@@ -587,15 +666,10 @@ func (s *store) createRootKey(w http.ResponseWriter, r *http.Request) {
 
 	s.log.Info("root key created", "id", id, "provider", req.Provider, "name", req.Name, "tenantId", req.TenantID)
 
-	writeJSON(w, http.StatusAccepted, keyResponse{
-		ID:              id,
-		TenantID:        req.TenantID,
-		Kind:            kind,
-		Name:            req.Name,
-		Provider:        req.Provider,
-		ProcessingState: processingStateProcessing,
-		LifecycleState:  lifecyclePreActive,
-	})
+	view := s.keyView(s.keys[id])
+	view.ProcessingState = processingStateProcessing
+	view.LifecycleState = lifecyclePreActive
+	writeJSON(w, http.StatusAccepted, view)
 }
 
 func (s *store) getRootKey(w http.ResponseWriter, r *http.Request) {
@@ -610,16 +684,82 @@ func (s *store) getRootKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, keyResponse{
-		ID:              k.ID,
-		TenantID:        k.TenantID,
-		Kind:            k.Kind,
-		Name:            k.Name,
-		Provider:        k.Provider,
-		ProcessingState: s.stateForAge(k.CreatedAt),
-		LifecycleState:  s.effectiveLifecycleState(k),
-		Version:         k.Version,
-	})
+	writeJSON(w, http.StatusOK, s.keyView(k))
+}
+
+func (s *store) createProvider(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req createProviderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is not a valid provider request")
+		return
+	}
+	if !validProvider(req.Provider) {
+		writeError(w, http.StatusBadRequest, "invalid_provider",
+			"provider must be one of aws, azure, openbao, gcp, vault, hsm")
+		return
+	}
+	if code, message := missingProviderField(req); code != "" {
+		writeError(w, http.StatusBadRequest, code, message)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	k, ok := s.keys[id]
+	if !ok || !isRootKeyKind(k.Kind) {
+		writeError(w, http.StatusNotFound, "root_key_not_found", fmt.Sprintf("root key %q does not exist", id))
+		return
+	}
+	if k.LifecycleState == lifecycleDestroyed || k.LifecycleState == lifecycleCompromised {
+		writeError(w, http.StatusConflict, "key_not_usable", fmt.Sprintf("root key %q is %s", id, k.LifecycleState))
+		return
+	}
+
+	switch {
+	case k.Provider == "":
+		k.Provider = req.Provider
+		k.Config = copyStringMap(req.Config)
+		s.persist()
+		s.log.Info("provider created", "id", id, "provider", req.Provider)
+	case k.Provider != req.Provider || !maps.Equal(k.Config, req.Config):
+		writeError(w, http.StatusConflict, "provider_exists",
+			fmt.Sprintf("root key %q already has provider %q; remove it first", id, k.Provider))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, s.keyView(k))
+}
+
+func (s *store) removeProvider(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	k, ok := s.keys[id]
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !isRootKeyKind(k.Kind) {
+		writeError(w, http.StatusNotFound, "root_key_not_found", fmt.Sprintf("root key %q does not exist", id))
+		return
+	}
+
+	if k.Provider != "" {
+		provider := k.Provider
+		k.Provider = ""
+		k.Config = nil
+		if k.LifecycleState == lifecycleActive || k.LifecycleState == lifecycleSuspended {
+			k.LifecycleState = lifecyclePreActive
+		}
+		s.persist()
+		s.log.Info("provider removed", "id", id, "provider", provider)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *store) createDEK(w http.ResponseWriter, r *http.Request) {
@@ -772,6 +912,17 @@ func (s *store) activateKey(w http.ResponseWriter, r *http.Request) {
 			LifecycleState: k.LifecycleState,
 			Version:        k.Version,
 		})
+		return
+	}
+
+	if isRootKeyKind(k.Kind) && k.Provider == "" {
+		writeError(w, http.StatusConflict, "provider_missing",
+			fmt.Sprintf("root key %q has no provider; create one before activating it", id))
+		return
+	}
+	if parent, ok := s.keys[k.ParentID]; ok && parent.LifecycleState != lifecycleActive {
+		writeError(w, http.StatusConflict, "parent_not_usable",
+			fmt.Sprintf("parent key %q is %s; activate it first", parent.ID, s.effectiveLifecycleState(parent)))
 		return
 	}
 
@@ -989,7 +1140,8 @@ func (s *store) deleteTenant(w http.ResponseWriter, r *http.Request) {
 // deleteKey removes a key by ID. Like deleteTenant, this endpoint is
 // idempotent — deleting a non-existent key returns 204 so finalizer
 // cleanup does not need to special-case the "already deleted" path.
-// Refuses to delete a key that still has children.
+// Refuses to delete a key that still has children, or a root key that
+// still has a provider.
 func (s *store) deleteKey(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -1008,6 +1160,11 @@ func (s *store) deleteKey(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("key %q still has children; delete them first", id))
 			return
 		}
+	}
+	if isRootKeyKind(k.Kind) && k.Provider != "" {
+		writeError(w, http.StatusConflict, "provider_linked",
+			fmt.Sprintf("root key %q still has provider %q; remove it first", id, k.Provider))
+		return
 	}
 
 	dedup := keyDedupKey{

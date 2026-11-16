@@ -86,7 +86,7 @@ func awsAccessKeyFromSecret(rk *operationsv1alpha1.AWSRootKey, s *corev1.Secret)
 
 func isSecretOwnedByAWSRootKey(s *corev1.Secret, rk *operationsv1alpha1.AWSRootKey) bool {
 	for _, ref := range s.OwnerReferences {
-		if ref.Kind == "AWSRootKey" && ref.UID == rk.UID {
+		if ref.Kind == awsRootKeyKind && ref.UID == rk.UID {
 			return true
 		}
 	}
