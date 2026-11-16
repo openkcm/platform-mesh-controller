@@ -45,11 +45,13 @@ const (
 	pollInterval       = 5 * time.Second
 	domainKeyTypeTeam  = "Team"
 	domainKeyKind      = "L2"
+	reasonUnconfigured = "Unconfigured"
 )
 
 // DomainKeyReconciler reconciles a DomainKey object across KCP workspaces.
 type DomainKeyReconciler struct {
 	APIClient        KeyBackend
+	L1Keys           L1KeyBackend
 	Manager          mcmanager.Manager
 	AccountNamespace string
 }
@@ -58,6 +60,8 @@ type DomainKeyReconciler struct {
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys/finalizers,verbs=update
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys;azurerootkeys;openbaorootkeys,verbs=get
+// +kubebuilder:rbac:groups=operations.openkcm.io,resources=gcprootkeys;vaultrootkeys;hsmrootkeys,verbs=get
 
 // Reconcile handles DomainKey create/update/delete events from KCP workspaces.
 func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
@@ -94,16 +98,7 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 		return ctrl.Result{}, nil
 	}
 
-	// Child≤parent invariant: effective desired is clamped by primary L1
-	// state. If L1 is not Active, DK must collapse to Deactivated even if
-	// spec.lifecycle says otherwise. Structurally invalid references are
-	// rejected before this clamp so bad edits cannot trigger deactivation.
-	primaryL1State, err := r.primaryRootKeyLifecycle(ctx, cl, dk)
-	if err != nil {
-		r.setFailedCondition(ctx, cl, dk, "RootKeyResolutionFailed", err.Error())
-		return ctrl.Result{}, err
-	}
-	effectiveDesired := effectiveDesiredLifecycle(dk.Spec.Lifecycle, primaryL1State)
+	effectiveDesired := dk.Spec.Lifecycle
 	desired := desiredLifecycleState(effectiveDesired)
 	if dk.Status.CryptoState != nil &&
 		dk.Status.CryptoState.LifecycleState == desired &&
@@ -112,9 +107,8 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 	}
 
 	// If the DomainKey already exists (has a Krypton key id) and is
-	// transitioning to Deactivated (either by user or by L1 cascade), skip
-	// the Active-L1 validation that resolvePrimaryRootKey enforces — we
-	// don't need an Active parent to deactivate ourselves.
+	// transitioning to Deactivated, skip resolving the root key reference:
+	// deactivating does not need it.
 	skipResolveCheck := dk.Status.CryptoState != nil && dk.Status.CryptoState.ID != "" &&
 		effectiveDesired == shared.DesiredLifecycleDeactivated
 	if !skipResolveCheck {
@@ -132,17 +126,22 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 		return r.createDomainKey(ctx, cl, dk)
 	}
 
-	// Step 2: PreActive → Active (one-time). May early-return if Krypton is
-	// still processing; otherwise updates status in-place and falls through
-	// to Step 3.
-	if dk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
-		if result, done, err := r.activatePreActiveDomainKey(ctx, dk); err != nil || done {
+	if !skipResolveCheck {
+		if result, done, err := r.syncRootKeyLink(ctx, cl, dk); err != nil || done {
 			return result, err
 		}
 	}
 
-	// Step 3: lifecycle reconcile (Active ⇄ Deactivated). Effective desired
-	// is clamped by the primary L1 root key state above.
+	// Step 2: PreActive → Active (one-time). May early-return if Krypton is
+	// still processing; otherwise updates status in-place and falls through
+	// to Step 3.
+	if dk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
+		if result, done, err := r.activatePreActiveDomainKey(ctx, cl, dk); err != nil || done {
+			return result, err
+		}
+	}
+
+	// Step 3: lifecycle reconcile (Active ⇄ Deactivated).
 	newState, transitioned, err := reconcileLifecycle(
 		ctx, r.APIClient, dk.Status.CryptoState.ID,
 		dk.Status.CryptoState.LifecycleState, effectiveDesired,
@@ -163,9 +162,6 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 				Message:            "DomainKey deactivated per spec.lifecycle.",
 				ObservedGeneration: dk.Generation,
 			})
-			if err := cascadeDeactivateDomainKey(ctx, cl, dk.Namespace, dk.Name); err != nil {
-				return ctrl.Result{}, err
-			}
 		} else {
 			meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
 				Type:               readyType,
@@ -175,6 +171,16 @@ func (r *DomainKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Req
 				ObservedGeneration: dk.Generation,
 			})
 		}
+	}
+	if dk.Status.CryptoState.LifecycleState == shared.LifecycleActive &&
+		!meta.IsStatusConditionTrue(dk.Status.Conditions, readyType) {
+		meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
+			Type:               readyType,
+			Status:             metav1.ConditionTrue,
+			Reason:             reasonKeyMaterialBound,
+			Message:            "DomainKey is active.",
+			ObservedGeneration: dk.Generation,
+		})
 	}
 	dk.Status.ObservedGeneration = dk.Generation
 	if err := cl.Status().Update(ctx, dk); err != nil {
@@ -223,18 +229,33 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
+	l1KeyID := dk.Status.L1KeyID
+	if l1KeyID == "" {
+		l1Resp, err := r.L1Keys.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
+			TenantID: tenantID,
+			Name:     domainKeyL1Name(dk),
+		})
+		if err != nil {
+			r.setFailedCondition(ctx, cl, dk, "KeyCreateFailed", err.Error())
+			return ctrl.Result{}, err
+		}
+		l1KeyID = l1Resp.ID
+	}
+
 	keyResp, err := r.APIClient.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenantID,
 		Kind:     domainKeyKind,
 		Name:     domainKeyOpenKCMName(dk),
+		ParentID: l1KeyID,
 	})
 	if err != nil {
 		r.setFailedCondition(ctx, cl, dk, "KeyCreateFailed", err.Error())
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("DomainKey created in OpenKCM", "keyID", keyResp.ID, "tenantID", tenantID)
+	logger.Info("DomainKey created in OpenKCM", "keyID", keyResp.ID, "l1KeyID", l1KeyID, "tenantID", tenantID)
 	now := metav1.Now()
+	dk.Status.L1KeyID = l1KeyID
 	dk.Status.CryptoState = &shared.CryptoState{
 		ID:             keyResp.ID,
 		LifecycleState: shared.LifecyclePreActive,
@@ -260,6 +281,10 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 	return ctrl.Result{RequeueAfter: pollInterval}, nil
 }
 
+func domainKeyL1Name(dk *operationsv1alpha1.DomainKey) string {
+	return domainKeyOpenKCMName(dk) + ".l1"
+}
+
 func domainKeyOpenKCMName(dk *operationsv1alpha1.DomainKey) string {
 	if dk.Namespace == "" {
 		return dk.Name
@@ -272,7 +297,9 @@ func domainKeyOpenKCMName(dk *operationsv1alpha1.DomainKey) string {
 // done=true the caller should return immediately; otherwise the function
 // has updated the in-memory status and the caller should continue with
 // Step 3 (lifecycle reconcile).
-func (r *DomainKeyReconciler) activatePreActiveDomainKey(ctx context.Context, dk *operationsv1alpha1.DomainKey) (ctrl.Result, bool, error) {
+func (r *DomainKeyReconciler) activatePreActiveDomainKey(
+	ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey,
+) (ctrl.Result, bool, error) {
 	logger := log.FromContext(ctx)
 	keyID := dk.Status.CryptoState.ID
 
@@ -282,6 +309,20 @@ func (r *DomainKeyReconciler) activatePreActiveDomainKey(ctx context.Context, dk
 	}
 	if keyResp.ProcessingState != processingStateReady {
 		return ctrl.Result{RequeueAfter: pollInterval}, true, nil
+	}
+
+	l1Active := false
+	if dk.Status.L1KeyID != "" {
+		l1, err := r.L1Keys.GetRootKey(ctx, dk.Status.L1KeyID)
+		if err != nil {
+			return ctrl.Result{}, true, err
+		}
+		l1Active = l1.LifecycleState == string(shared.LifecycleActive)
+	}
+	if !l1Active {
+		r.setFailedCondition(ctx, cl, dk, reasonUnconfigured,
+			"The DomainKey has no root key provider yet; link a Root Key to activate it.")
+		return ctrl.Result{}, true, nil
 	}
 
 	activateResp, err := r.APIClient.ActivateKey(ctx, keyID)
@@ -337,44 +378,9 @@ func rootKeyResolutionFailureResult(err error) (ctrl.Result, bool) {
 	return ctrl.Result{RequeueAfter: pollInterval}, true
 }
 
-// primaryRootKeyLifecycle reads the lifecycle state of the L1 referenced by
-// dk.spec.primaryRootKeyRef without erroring when the L1 is non-Active.
-// Used to clamp the DomainKey's effective desired lifecycle by the parent's
-// state (child≤parent invariant). Returns empty string when the reference is
-// empty or points at a missing root key; callers should treat empty as
-// non-Active. Invalid reference shape is returned as an error so bad edits do
-// not look like a non-Active parent and accidentally deactivate the DomainKey.
-func (r *DomainKeyReconciler) primaryRootKeyLifecycle(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) (shared.LifecycleState, error) {
-	ref := dk.Spec.PrimaryRootKeyRef
-	if ref == nil || ref.Name == "" {
-		// No linked root: the domain key hangs off Krypton's default root,
-		// which is always active, so nothing clamps its lifecycle.
-		return shared.LifecycleActive, nil
-	}
-	gvr := rootKeyGVK(ref.Kind)
-	if gvr == nil {
-		return "", fmt.Errorf("unsupported primaryRootKeyRef.kind %q", ref.Kind)
-	}
-	obj := gvr.newEmpty()
-	refNamespace, ok := allowedRootKeyReferenceNamespace(ref, dk.Namespace, r.AccountNamespace)
-	if !ok {
-		accountNamespace := defaultAccountNamespace(r.AccountNamespace)
-		return "", fmt.Errorf("primaryRootKeyRef namespace %q is not allowed; use same namespace %q or account namespace %q",
-			refNamespace, dk.Namespace, accountNamespace)
-	}
-	if err := cl.Get(ctx, types.NamespacedName{Namespace: refNamespace, Name: ref.Name}, obj); err != nil {
-		return "", nil
-	}
-	cs := rootKeyCryptoState(obj)
-	if cs == nil {
-		return "", nil
-	}
-	return cs.LifecycleState, nil
-}
-
 // resolvePrimaryRootKey loads the L1 referent named by spec.primaryRootKeyRef
-// and fails reconciliation if it is invalid. Missing or inactive root keys are
-// pending dependencies and should keep the DomainKey on the poll loop.
+// and fails reconciliation if it is invalid. A missing root key is a pending
+// dependency and keeps the DomainKey on the poll loop.
 func (r *DomainKeyReconciler) resolvePrimaryRootKey(ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey) error {
 	ref := dk.Spec.PrimaryRootKeyRef
 	if ref == nil || ref.Name == "" {
@@ -402,12 +408,6 @@ func (r *DomainKeyReconciler) resolvePrimaryRootKey(ctx context.Context, cl clie
 		}
 		return err
 	}
-	cryptoState := rootKeyCryptoState(obj)
-	if cryptoState == nil || cryptoState.LifecycleState != shared.LifecycleActive {
-		return &rootKeyPendingError{
-			err: fmt.Errorf("primaryRootKeyRef %s/%s/%s is not Active", ref.Kind, refNamespace, ref.Name),
-		}
-	}
 	return nil
 }
 
@@ -429,6 +429,10 @@ func (r *DomainKeyReconciler) handleDeletion(ctx context.Context, cl client.Clie
 		default:
 			logger.Info("DomainKey deleted from OpenKCM", "keyID", dk.Status.CryptoState.ID)
 		}
+	}
+	if err := r.deleteL1Key(ctx, dk); err != nil {
+		logger.Error(err, "Failed to delete the DomainKey's L1 in OpenKCM; will retry", "l1KeyID", dk.Status.L1KeyID)
+		return ctrl.Result{}, err
 	}
 
 	controllerutil.RemoveFinalizer(dk, domainKeyFinalizer)

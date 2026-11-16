@@ -42,17 +42,9 @@ type Backend interface {
 	DeleteRootKey(ctx context.Context, id string) error
 }
 
-type AWSRootKeyBackend interface {
-	keyLifecycler
-
+type L1KeyBackend interface {
 	CreateRootKey(ctx context.Context, req openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error)
 	GetRootKey(ctx context.Context, id string) (*openkcmapi.GetRootKeyResponse, error)
-	DeleteRootKey(ctx context.Context, id string) error
-	BindAWSProvider(ctx context.Context, id string, provider openkcmapi.AWSProvider) error
-}
-
-type rootKeyDeleter interface {
-	DeleteRootKey(ctx context.Context, id string) error
 }
 
 // KeyBackend is the slice the DomainKey and ServiceKey reconcilers drive. It is
@@ -95,7 +87,7 @@ type TenantBackend interface {
 }
 
 var (
-	_ Backend           = (*openkcmapi.Client)(nil)
-	_ KeyBackend        = (*openkcmapi.Client)(nil)
-	_ AWSRootKeyBackend = (*openkcmapi.Client)(nil)
+	_ Backend      = (*openkcmapi.Client)(nil)
+	_ KeyBackend   = (*openkcmapi.Client)(nil)
+	_ L1KeyBackend = (*openkcmapi.Client)(nil)
 )

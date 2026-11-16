@@ -10,9 +10,6 @@ rules:
   - namespaces
   verbs:
   - create
-  - get
-  - list
-  - watch
 - apiGroups:
   - apis.kcp.io
   resources:
@@ -32,9 +29,17 @@ rules:
   resources:
   - awsrootkeys
   - azurerootkeys
+  - gcprootkeys
+  - hsmrootkeys
+  - openbaorootkeys
+  - vaultrootkeys
+  verbs:
+  - get
+- apiGroups:
+  - operations.openkcm.io
+  resources:
   - dataencryptionkeys
   - domainkeys
-  - openbaorootkeys
   - servicekeys
   - tenants
   verbs:
@@ -48,11 +53,8 @@ rules:
 - apiGroups:
   - operations.openkcm.io
   resources:
-  - awsrootkeys/finalizers
-  - azurerootkeys/finalizers
   - dataencryptionkeys/finalizers
   - domainkeys/finalizers
-  - openbaorootkeys/finalizers
   - servicekeys/finalizers
   - tenants/finalizers
   verbs:
@@ -60,11 +62,8 @@ rules:
 - apiGroups:
   - operations.openkcm.io
   resources:
-  - awsrootkeys/status
-  - azurerootkeys/status
   - dataencryptionkeys/status
   - domainkeys/status
-  - openbaorootkeys/status
   - servicekeys/status
   - tenants/status
   verbs:

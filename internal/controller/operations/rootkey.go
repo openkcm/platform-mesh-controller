@@ -17,62 +17,14 @@ limitations under the License.
 package operations
 
 import (
-	"context"
-	"errors"
-
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 	"github.com/openkcm/platform-mesh-controller/api/shared"
-	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
-const (
-	openkcmSystemNamespace   = "openkcm-system"
-	caCertKey                = "ca.crt"
-	rootKeyRegisteredMessage = "Root key registered, awaiting activation"
-
-	reasonUnconfigured      = "Unconfigured"
-	reasonResetFailed       = "ResetFailed"
-	slotUnconfiguredMessage = "The slot has no provider configuration."
-	slotStateUnconfigured   = "Unconfigured"
-	slotStateConfiguring    = "Configuring"
-	slotStateConfigured     = "Configured"
-	slotStateResetFailed    = "ResetFailed"
-)
-
-func slotConfigured(configured *bool) bool {
-	return configured == nil || *configured
-}
-
-func markSlotUnconfigured(conditions *[]metav1.Condition, slotState *string, generation int64) bool {
-	changed := meta.SetStatusCondition(conditions, metav1.Condition{
-		Type:               readyType,
-		Status:             metav1.ConditionFalse,
-		Reason:             reasonUnconfigured,
-		Message:            slotUnconfiguredMessage,
-		ObservedGeneration: generation,
-	})
-	if *slotState == slotStateUnconfigured {
-		return changed
-	}
-	*slotState = slotStateUnconfigured
-	return true
-}
-
-func deleteSlotKey(ctx context.Context, api rootKeyDeleter, state *shared.CryptoState) error {
-	if state == nil || state.ID == "" {
-		return nil
-	}
-	if err := api.DeleteRootKey(ctx, state.ID); err != nil &&
-		!errors.Is(err, errors.ErrUnsupported) && !openkcmapi.IsNotImplemented(err) {
-		return err
-	}
-	return nil
-}
+const awsRootKeyKind = "AWSRootKey"
 
 // rootKeyGVKEntry pairs a GroupVersionKind with a factory that returns a
 // concrete typed client.Object for that kind. Used by reconcilers that
@@ -87,9 +39,9 @@ type rootKeyGVKEntry struct {
 // scheme (avoids spinning up an unstructured client just for ref resolution).
 func rootKeyGVK(kind string) *rootKeyGVKEntry {
 	switch kind {
-	case "AWSRootKey":
+	case awsRootKeyKind:
 		return &rootKeyGVKEntry{
-			GVK:      operationsv1alpha1.GroupVersion.WithKind("AWSRootKey"),
+			GVK:      operationsv1alpha1.GroupVersion.WithKind(awsRootKeyKind),
 			newEmpty: func() client.Object { return &operationsv1alpha1.AWSRootKey{} },
 		}
 	case "AzureRootKey":
@@ -122,25 +74,6 @@ func rootKeyGVK(kind string) *rootKeyGVKEntry {
 	}
 }
 
-func rootKeyCryptoState(obj client.Object) *shared.CryptoState {
-	switch rootKey := obj.(type) {
-	case *operationsv1alpha1.AWSRootKey:
-		return rootKey.Status.CryptoState
-	case *operationsv1alpha1.AzureRootKey:
-		return rootKey.Status.CryptoState
-	case *operationsv1alpha1.OpenBaoRootKey:
-		return rootKey.Status.CryptoState
-	case *operationsv1alpha1.GCPRootKey:
-		return rootKey.Status.CryptoState
-	case *operationsv1alpha1.VaultRootKey:
-		return rootKey.Status.CryptoState
-	case *operationsv1alpha1.HSMRootKey:
-		return rootKey.Status.CryptoState
-	default:
-		return nil
-	}
-}
-
 func rootKeyReferenceNamespace(ref *shared.TypedReference, fallbackNamespace string) string {
 	if ref != nil && ref.Namespace != "" {
 		return ref.Namespace
@@ -161,17 +94,4 @@ func allowedRootKeyReferenceNamespace(
 		return refNamespace, true
 	}
 	return refNamespace, false
-}
-
-func ensureAutoDomainKeysForActiveAccountRoot(
-	ctx context.Context,
-	cl client.Client,
-	rootNamespace string,
-	accountNamespace string,
-	state *shared.CryptoState,
-) error {
-	if state == nil || state.LifecycleState != shared.LifecycleActive {
-		return nil
-	}
-	return ensureAutoDomainKeysForAccountRoot(ctx, cl, rootNamespace, accountNamespace)
 }

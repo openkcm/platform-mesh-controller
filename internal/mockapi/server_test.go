@@ -74,10 +74,19 @@ func TestDEKRequiresActiveServiceKey(t *testing.T) {
 
 	tenant, err := client.CreateTenant(ctx, openkcmapi.CreateTenantRequest{Name: "ig-clean-account"})
 	require.NoError(t, err, "create tenant")
+	root, err := client.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
+		TenantID: tenant.ID,
+		Provider: "openbao",
+		Name:     "root",
+	})
+	require.NoError(t, err, "create root key")
+	_, err = client.ActivateKey(ctx, root.ID)
+	require.NoError(t, err, "activate root key")
 	domain, err := client.CreateKey(ctx, openkcmapi.CreateKeyRequest{
 		TenantID: tenant.ID,
 		Kind:     "L2",
 		Name:     "domain",
+		ParentID: root.ID,
 	})
 	require.NoError(t, err, "create L2")
 	_, err = client.ActivateKey(ctx, domain.ID)

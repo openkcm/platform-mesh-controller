@@ -42,9 +42,11 @@ type testBackend struct {
 	deleteKeyErr error
 	keyLifecycle shared.LifecycleState
 
-	createKeyCalls   []openkcmapi.CreateKeyRequest
-	activateKeyCalls []string
-	deleteKeyCalls   []string
+	createKeyCalls     []openkcmapi.CreateKeyRequest
+	createRootKeyCalls []openkcmapi.CreateRootKeyRequest
+	l1Lifecycle        shared.LifecycleState
+	activateKeyCalls   []string
+	deleteKeyCalls     []string
 
 	createTenantFn func(openkcmapi.CreateTenantRequest) (*openkcmapi.CreateTenantResponse, error)
 	getTenantFn    func(string) (*openkcmapi.GetTenantResponse, error)
@@ -53,6 +55,8 @@ type testBackend struct {
 
 // testKeyID is what the test backend hands back for a created key.
 const testKeyID = "key-uuid"
+
+const testL1KeyID = "l1-uuid"
 
 func (f *testBackend) CreateTenant(
 	_ context.Context,
@@ -153,12 +157,21 @@ func (f *testBackend) DeactivateKey(_ context.Context, id string) (*openkcmapi.A
 	}, nil
 }
 func (f *testBackend) CreateRootKey(
-	context.Context, openkcmapi.CreateRootKeyRequest,
+	_ context.Context, req openkcmapi.CreateRootKeyRequest,
 ) (*openkcmapi.CreateRootKeyResponse, error) {
-	return &openkcmapi.CreateRootKeyResponse{}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createRootKeyCalls = append(f.createRootKeyCalls, req)
+	return &openkcmapi.CreateRootKeyResponse{ID: testL1KeyID}, nil
 }
-func (f *testBackend) GetRootKey(context.Context, string) (*openkcmapi.GetRootKeyResponse, error) {
-	return &openkcmapi.GetRootKeyResponse{}, nil
+func (f *testBackend) GetRootKey(_ context.Context, id string) (*openkcmapi.GetRootKeyResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	lifecycle := f.l1Lifecycle
+	if lifecycle == "" {
+		lifecycle = shared.LifecyclePreActive
+	}
+	return &openkcmapi.GetRootKeyResponse{ID: id, LifecycleState: string(lifecycle)}, nil
 }
 func (f *testBackend) DeleteRootKey(context.Context, string) error { return nil }
 func (f *testBackend) CreateDEK(

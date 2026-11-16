@@ -1952,6 +1952,8 @@ spec:
                   format: int32
                   type: integer
               type: object
+            l1KeyId:
+              type: string
             observedGeneration:
               description: ObservedGeneration is the last observed generation.
               format: int64

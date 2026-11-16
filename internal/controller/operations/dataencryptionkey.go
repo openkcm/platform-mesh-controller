@@ -103,9 +103,11 @@ func (r *DataEncryptionKeyReconciler) Reconcile(ctx context.Context, req mcrecon
 		serviceKeyState = sk.Status.CryptoState.LifecycleState
 	}
 
-	// Child cannot be more active than parent: if SK is not Active, DEK
-	// effective desired collapses to Deactivated regardless of spec.
-	effectiveDesired := effectiveDesiredLifecycle(dek.Spec.Lifecycle, serviceKeyState)
+	dataEncryptionKeyState := shared.LifecycleState("")
+	if dek.Status.CryptoState != nil {
+		dataEncryptionKeyState = dek.Status.CryptoState.LifecycleState
+	}
+	effectiveDesired := effectiveDesiredLifecycle(dek.Spec.Lifecycle, serviceKeyState, dataEncryptionKeyState)
 	desired := desiredLifecycleState(effectiveDesired)
 	if dek.Status.CryptoState != nil &&
 		dek.Status.CryptoState.LifecycleState == desired &&

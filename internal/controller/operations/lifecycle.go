@@ -13,9 +13,6 @@ package operations
 import (
 	"context"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 	"github.com/openkcm/platform-mesh-controller/api/shared"
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
@@ -30,18 +27,15 @@ func desiredLifecycleState(d shared.DesiredLifecycle) shared.LifecycleState {
 	return shared.LifecycleActive
 }
 
-// effectiveDesiredLifecycle clamps spec.lifecycle by the parent's actual
-// lifecycle state. A child cannot be in a state more active than its parent —
-// if the parent is anything other than Active, the child must also be
-// Deactivated regardless of its own spec.lifecycle. This guards against
-// the case where a user re-activates a child while its parent is still
-// Deactivated, which would otherwise create an impossible state where the
-// encryption chain claims to work but the parent isn't backing it.
+// effectiveDesiredLifecycle keeps a child from being activated while its parent
+// is not Active. It never deactivates a child that is already Active: there
+// is no cascade, the parent's state only gates activation.
 func effectiveDesiredLifecycle(
 	specLifecycle shared.DesiredLifecycle,
 	parentState shared.LifecycleState,
+	currentState shared.LifecycleState,
 ) shared.DesiredLifecycle {
-	if parentState != shared.LifecycleActive {
+	if parentState != shared.LifecycleActive && currentState != shared.LifecycleActive {
 		return shared.DesiredLifecycleDeactivated
 	}
 	return specLifecycle
@@ -86,107 +80,4 @@ func reconcileLifecycle(
 		return current, false, err
 	}
 	return shared.LifecycleState(resp.LifecycleState), true, nil
-}
-
-// cascadeDeactivateRootKey patches spec.lifecycle=Deactivated on every
-// DomainKey whose primary or fallback root key reference matches the given
-// (rootKeyKind, rootKeyNamespace, rootKeyName). The DomainKey reconciler will
-// then deactivate the domain key itself and cascade onward to its dependent
-// ServiceKeys + Data Encryption Keys.
-func cascadeDeactivateRootKey(ctx context.Context, cl client.Client, rootKeyKind, namespace, rootKeyName string) error {
-	dks := &operationsv1alpha1.DomainKeyList{}
-	if err := cl.List(ctx, dks); err != nil {
-		return err
-	}
-	for i := range dks.Items {
-		dk := &dks.Items[i]
-		if !rootKeyRefMatches(dk, rootKeyKind, namespace, rootKeyName) {
-			continue
-		}
-		if dk.Spec.Lifecycle == shared.DesiredLifecycleDeactivated {
-			continue
-		}
-		dk.Spec.Lifecycle = shared.DesiredLifecycleDeactivated
-		if err := cl.Update(ctx, dk); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func rootKeyRefMatches(dk *operationsv1alpha1.DomainKey, kind, namespace, name string) bool {
-	if primary := dk.Spec.PrimaryRootKeyRef; primary != nil &&
-		primary.Kind == kind && rootKeyReferenceNamespace(primary, dk.Namespace) == namespace && primary.Name == name {
-		return true
-	}
-	for _, ref := range dk.Spec.FallbackRootKeyRefs {
-		if ref.Kind == kind && rootKeyReferenceNamespace(&ref, dk.Namespace) == namespace && ref.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// cascadeDeactivateDomainKey patches spec.lifecycle=Deactivated on every
-// ServiceKey that points at this DomainKey. A System DomainKey can have
-// ServiceKeys in other namespaces, so all namespaces are listed.
-func cascadeDeactivateDomainKey(ctx context.Context, cl client.Client, namespace, domainKeyName string) error {
-	sks := &operationsv1alpha1.ServiceKeyList{}
-	if err := cl.List(ctx, sks); err != nil {
-		return err
-	}
-	return deactivateChildren(ctx, cl, pointersTo(sks.Items), domainKeyName,
-		func(sk *operationsv1alpha1.ServiceKey) string {
-			if domainKeyNamespaceOf(sk) != namespace {
-				return ""
-			}
-			return sk.Spec.DomainKeyRef
-		},
-		func(sk *operationsv1alpha1.ServiceKey) *shared.DesiredLifecycle { return &sk.Spec.Lifecycle },
-	)
-}
-
-// cascadeDeactivateServiceKey patches spec.lifecycle=Deactivated on every
-// DataEncryptionKey in the same namespace that points at this ServiceKey.
-func cascadeDeactivateServiceKey(ctx context.Context, cl client.Client, namespace, serviceKeyName string) error {
-	deks := &operationsv1alpha1.DataEncryptionKeyList{}
-	if err := cl.List(ctx, deks, client.InNamespace(namespace)); err != nil {
-		return err
-	}
-	return deactivateChildren(ctx, cl, pointersTo(deks.Items), serviceKeyName,
-		func(dek *operationsv1alpha1.DataEncryptionKey) string { return dek.Spec.ServiceKeyRef },
-		func(dek *operationsv1alpha1.DataEncryptionKey) *shared.DesiredLifecycle { return &dek.Spec.Lifecycle },
-	)
-}
-
-func deactivateChildren[T client.Object](
-	ctx context.Context,
-	cl client.Client,
-	children []T,
-	parentName string,
-	parentOf func(T) string,
-	lifecycleOf func(T) *shared.DesiredLifecycle,
-) error {
-	for _, child := range children {
-		if parentOf(child) != parentName {
-			continue
-		}
-		lifecycle := lifecycleOf(child)
-		if *lifecycle == shared.DesiredLifecycleDeactivated {
-			continue
-		}
-		*lifecycle = shared.DesiredLifecycleDeactivated
-		if err := cl.Update(ctx, child); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func pointersTo[T any](items []T) []*T {
-	pointers := make([]*T, len(items))
-	for i := range items {
-		pointers[i] = &items[i]
-	}
-	return pointers
 }

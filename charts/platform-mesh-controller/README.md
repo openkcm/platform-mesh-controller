@@ -4,16 +4,16 @@ The chart deploys the controller that integrates OpenKCM into
 [Platform Mesh](https://platform-mesh.io/). The controller watches the account workspaces of a
 kcp control plane through the `operations.openkcm.io` APIExport, creates a Tenant for each
 account that binds the APIExport from the marketplace, and reconciles the key resources of the
-accounts (Tenant, DomainKey, ServiceKey, the root keys for AWS, Azure and OpenBao,
-DataEncryptionKey) against OpenKCM.
+accounts (Tenant, DomainKey, ServiceKey, DataEncryptionKey) against OpenKCM. Root keys (AWS,
+Azure, OpenBao, ...) are customer data in kcp only: the controller does not reconcile them.
 
 The APIExport, its schemas and the portal content come from the
 [platform-mesh-integration](../platform-mesh-integration) chart, installed into the kcp provider workspace.
 
 > [!WARNING]
 > The controller is in development. By default every reconciler talks to an in-pod mock of
-> the OpenKCM API. Set `krypton.grpcAddr` to bind the Tenant, DomainKey, ServiceKey,
-> DataEncryptionKey and AWSRootKey reconcilers to Krypton.
+> the OpenKCM API. Set `krypton.grpcAddr` to bind the Tenant, DomainKey, ServiceKey and
+> DataEncryptionKey reconcilers to Krypton.
 
 [values.yaml](values.yaml) documents every value and the controller's flags.
 
@@ -74,7 +74,7 @@ kubectl -n platform-mesh-controller-system logs deployment/platform-mesh-control
 | `tenantNamespace` | `default` | Namespace of the Tenant and keys in each account workspace |
 | `krypton.grpcAddr` | `""` | Krypton's gRPC API; empty: the mock API |
 | `krypton.tls` | `false` | TLS to `krypton.grpcAddr`, verified against the CA certificates of the image |
-| `openkcmAPI.url` | the in-pod mock API | OpenKCM API of the Azure and OpenBao root key reconcilers, and of the AWS one without `krypton.grpcAddr` |
+| `openkcmAPI.url` | the in-pod mock API | OpenKCM API of the reconcilers when `krypton.grpcAddr` is empty |
 | `l1Authorization.enabled` | `false` | Serve the L1 access webhook; it allows every review |
 | `l1Authorization.ingress.host` | `""` | Host of `https://<host>/validate-l1-access`, with `ingress.enabled` |
 | `extraArgs` | `[]` | Other flags, for example `--default-tenant-region` or `--zap-devel=false` |
