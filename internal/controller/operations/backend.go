@@ -42,6 +42,19 @@ type Backend interface {
 	DeleteRootKey(ctx context.Context, id string) error
 }
 
+type AWSRootKeyBackend interface {
+	keyLifecycler
+
+	CreateRootKey(ctx context.Context, req openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error)
+	GetRootKey(ctx context.Context, id string) (*openkcmapi.GetRootKeyResponse, error)
+	DeleteRootKey(ctx context.Context, id string) error
+	BindAWSProvider(ctx context.Context, id string, provider openkcmapi.AWSProvider) error
+}
+
+type rootKeyDeleter interface {
+	DeleteRootKey(ctx context.Context, id string) error
+}
+
 // KeyBackend is the slice the DomainKey and ServiceKey reconcilers drive. It is
 // separate so they can bind to a Krypton-backed client that has no root-key
 // support yet. Tenant identity is read from the Tenant CR, not created here.
@@ -82,6 +95,7 @@ type TenantBackend interface {
 }
 
 var (
-	_ Backend    = (*openkcmapi.Client)(nil)
-	_ KeyBackend = (*openkcmapi.Client)(nil)
+	_ Backend           = (*openkcmapi.Client)(nil)
+	_ KeyBackend        = (*openkcmapi.Client)(nil)
+	_ AWSRootKeyBackend = (*openkcmapi.Client)(nil)
 )

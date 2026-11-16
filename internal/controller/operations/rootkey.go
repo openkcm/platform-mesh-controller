@@ -18,6 +18,7 @@ package operations
 
 import (
 	"context"
+	"errors"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,7 @@ import (
 
 	operationsv1alpha1 "github.com/openkcm/platform-mesh-controller/api/operations/v1alpha1"
 	"github.com/openkcm/platform-mesh-controller/api/shared"
+	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
 const (
@@ -61,11 +63,15 @@ func markSlotUnconfigured(conditions *[]metav1.Condition, slotState *string, gen
 	return true
 }
 
-func deleteSlotKey(ctx context.Context, api Backend, state *shared.CryptoState) error {
+func deleteSlotKey(ctx context.Context, api rootKeyDeleter, state *shared.CryptoState) error {
 	if state == nil || state.ID == "" {
 		return nil
 	}
-	return api.DeleteRootKey(ctx, state.ID)
+	if err := api.DeleteRootKey(ctx, state.ID); err != nil &&
+		!errors.Is(err, errors.ErrUnsupported) && !openkcmapi.IsNotImplemented(err) {
+		return err
+	}
+	return nil
 }
 
 // rootKeyGVKEntry pairs a GroupVersionKind with a factory that returns a

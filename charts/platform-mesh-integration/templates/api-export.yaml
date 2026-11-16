@@ -80,3 +80,9 @@ spec:
     - group: apis.kcp.io
       resource: apibindings
       verbs: ["get", "list", "watch"]
+    - group: ""
+      resource: secrets
+      verbs: ["get", "list", "watch"]
+      defaultSelector:
+        matchLabels:
+          openkcm.io/root-key-credentials: "true"

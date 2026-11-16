@@ -84,10 +84,12 @@ func newActiveRootKey() *operationsv1alpha1.AWSRootKey {
 		TenantNameRef: testAccountName,
 		Region:        "eu-central-1",
 		KeyURI:        "arn:aws:kms:eu-central-1:000000000000:key/abc",
-		RolesAnywhere: operationsv1alpha1.AWSRolesAnywhereConfig{
-			TrustAnchorARN: "arn:aws:rolesanywhere:eu-central-1:000000000000:trust-anchor/a",
-			ProfileARN:     "arn:aws:rolesanywhere:eu-central-1:000000000000:profile/p",
-			RoleARN:        "arn:aws:iam::000000000000:role/r",
+		Auth: &operationsv1alpha1.AWSAuth{
+			Method: operationsv1alpha1.AWSAuthMethodAccessKey,
+			AccessKey: &operationsv1alpha1.AWSAccessKeyAuth{
+				RoleARN:   "arn:aws:iam::000000000000:role/r",
+				SecretRef: shared.SecretReference{Name: "awsrootkey-" + rk.Name, Namespace: domainKeyNamespace},
+			},
 		},
 	}
 	Expect(k8sClient.Create(ctx, rk)).To(Succeed())

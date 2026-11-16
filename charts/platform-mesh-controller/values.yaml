@@ -212,15 +212,16 @@ mockAPI:
   addr: "127.0.0.1:9443"
 
 openkcmAPI:
-  # -- OpenKCM HTTP API that the reconcilers call. Default: the in-pod mock API. The root key
-  # reconcilers (AWS, Azure, OpenBao) always use it; the others use Krypton when
-  # `krypton.grpcAddr` is set.
+  # -- OpenKCM HTTP API that the reconcilers call. Default: the in-pod mock API. The Azure and
+  # OpenBao root key reconcilers always use it; the others use Krypton when `krypton.grpcAddr`
+  # is set.
   url: "http://127.0.0.1:9443"
 
 krypton:
   # -- `host:port` of the gRPC API of the Krypton root node, for example
-  # `krypton-root.services.svc:8080`. When set, the Tenant, DomainKey, ServiceKey and
-  # DataEncryptionKey reconcilers use Krypton instead of `openkcmAPI.url`. The connection is
+  # `krypton-root.services.svc:8080`. When set, the Tenant, DomainKey, ServiceKey,
+  # DataEncryptionKey and AWSRootKey reconcilers use Krypton instead of `openkcmAPI.url`. The
+  # AWSRootKey reconciler sends the customer's access key in CreateProvider. The connection is
   # plaintext: use it inside a service mesh with mutual TLS, to a root node without
   # `config.auth`. Empty: the mock API.
   grpcAddr: ""

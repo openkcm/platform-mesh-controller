@@ -18,6 +18,9 @@ package operations
 
 import (
 	"context"
+	"errors"
+	"sync"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,15 +38,21 @@ import (
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 )
 
-const awsRootKeyFinalizer = "operations.openkcm.io/awsrootkey-cleanup"
+const (
+	awsRootKeyFinalizer = "operations.openkcm.io/awsrootkey-cleanup"
 
-// AWSRootKeyReconciler reconciles an AWSRootKey (L1) via the mock API.
-// Real AWS KMS / Roles Anywhere wiring is a follow-up; v0.7.0 stands in
-// the mock API for upstream calls per #216 acceptance criteria.
+	providerBoundType         = "ProviderBound"
+	reasonProviderBound       = "ProviderBound"
+	reasonProviderUnsupported = "ProviderUnsupported"
+	providerUnsupportedRetry  = 5 * time.Minute
+)
+
 type AWSRootKeyReconciler struct {
-	APIClient        Backend
+	APIClient        AWSRootKeyBackend
 	Manager          mcmanager.Manager
 	AccountNamespace string
+
+	secretReaders sync.Map
 }
 
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=awsrootkeys,verbs=get;list;watch;create;update;patch;delete
@@ -52,8 +61,6 @@ type AWSRootKeyReconciler struct {
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get
 
 func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("cluster", req.ClusterName)
-
 	cl, err := r.clusterClient(ctx, req.ClusterName)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -91,77 +98,7 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	}
 
 	if rk.Status.CryptoState == nil || rk.Status.CryptoState.ID == "" {
-		rk.Status.SlotState = slotStateConfiguring
-		account, err := resolveAccount(ctx, cl, r.AccountNamespace)
-		if err != nil {
-			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != account.Name {
-			logger.Info("ignoring spec.tenantNameRef; using path-derived account",
-				"specName", rk.Spec.TenantNameRef, "accountName", account.Name)
-		}
-		tenantID, err := resolveTenantID(ctx, cl, account)
-		if err != nil {
-			r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		if tenantID == "" {
-			r.setFailed(ctx, cl, rk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
-			return ctrl.Result{RequeueAfter: pollInterval}, nil
-		}
-
-		resp, err := r.APIClient.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
-			TenantID: tenantID,
-			Provider: "aws",
-			Name:     rk.Name,
-			Config: map[string]string{
-				"region":         rk.Spec.Region,
-				"keyUri":         rk.Spec.KeyURI,
-				"endpointUrl":    rk.Spec.EndpointURL,
-				"trustAnchorArn": rk.Spec.RolesAnywhere.TrustAnchorARN,
-				"profileArn":     rk.Spec.RolesAnywhere.ProfileARN,
-				"roleArn":        rk.Spec.RolesAnywhere.RoleARN,
-			},
-		})
-		if err != nil {
-			r.setFailed(ctx, cl, rk, "RootKeyCreateFailed", err.Error())
-			return ctrl.Result{}, err
-		}
-		logger.Info("AWSRootKey registered", "rootKeyID", resp.ID)
-
-		now := metav1.Now()
-		rk.Status.CryptoState = &shared.CryptoState{
-			ID:             resp.ID,
-			LifecycleState: shared.LifecyclePreActive,
-		}
-		rk.Status.OperationID = resp.ID
-		rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
-			Success:            true,
-			Message:            "AWS root key registered; awaiting activation.",
-			InternalKeyID:      resp.ID,
-			LastTransitionTime: &now,
-			IdentityInfo: &shared.IdentityInfo{
-				Subject: "CN=" + account.Name + " OU=Krypton, O=OpenKCM",
-				CertificateSecretRef: &shared.SecretKeyReference{
-					Name:      "aws-kms-ca",
-					Namespace: openkcmSystemNamespace,
-					Key:       caCertKey,
-				},
-			},
-		}
-		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               readyType,
-			Status:             metav1.ConditionFalse,
-			Reason:             reasonProcess,
-			Message:            rootKeyRegisteredMessage,
-			ObservedGeneration: rk.Generation,
-		})
-		rk.Status.ObservedGeneration = rk.Generation
-		if err := cl.Status().Update(ctx, rk); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: pollInterval}, nil
+		return r.register(ctx, req.ClusterName, cl, rk)
 	}
 
 	resp, err := r.APIClient.GetRootKey(ctx, rk.Status.CryptoState.ID)
@@ -175,25 +112,9 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	// PreActive → Active happens once. After that, Active⇄Deactivated is
 	// driven by spec.lifecycle in the reconcileLifecycle step below.
 	if rk.Status.CryptoState.LifecycleState == shared.LifecyclePreActive {
-		activateResp, err := r.APIClient.ActivateKey(ctx, rk.Status.CryptoState.ID)
-		if err != nil {
-			return ctrl.Result{}, err
+		if result, finished, err := r.activate(ctx, req.ClusterName, cl, rk, resp); !finished {
+			return result, err
 		}
-		logger.Info("AWSRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
-		now := metav1.Now()
-		rk.Status.CryptoState.LifecycleState = shared.LifecycleState(activateResp.LifecycleState)
-		rk.Status.CryptoState.Version = activateResp.Version
-		rk.Status.CryptoState.LastRotatedAt = &now
-		rk.Status.ReconciliationStatus.LastTransitionTime = &now
-		rk.Status.ReconciliationStatus.Message = "AWS KMS bound and authenticated."
-		rk.Status.SlotState = slotStateConfigured
-		meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
-			Type:               readyType,
-			Status:             metav1.ConditionTrue,
-			Reason:             reasonUpstreamAuthenticated,
-			Message:            "Successfully bound to AWS KMS",
-			ObservedGeneration: rk.Generation,
-		})
 	}
 
 	newState, transitioned, err := reconcileLifecycle(
@@ -201,6 +122,10 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 		rk.Status.CryptoState.LifecycleState, rk.Spec.Lifecycle,
 	)
 	if err != nil {
+		if openkcmapi.IsNotImplemented(err) {
+			r.setFailed(ctx, cl, rk, reasonProviderUnsupported, err.Error())
+			return ctrl.Result{RequeueAfter: providerUnsupportedRetry}, nil
+		}
 		r.setFailed(ctx, cl, rk, "LifecycleTransitionFailed", err.Error())
 		return ctrl.Result{}, err
 	}
@@ -236,6 +161,187 @@ func (r *AWSRootKeyReconciler) Reconcile(ctx context.Context, req mcreconcile.Re
 	return ctrl.Result{}, ensureAutoDomainKeysForActiveAccountRoot(ctx, cl, rk.Namespace, r.AccountNamespace, rk.Status.CryptoState)
 }
 
+func (r *AWSRootKeyReconciler) register(
+	ctx context.Context, clusterName multicluster.ClusterName, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).WithValues("cluster", clusterName)
+
+	if rk.Spec.Auth == nil || rk.Spec.Auth.AccessKey == nil {
+		r.setFailed(ctx, cl, rk, "InvalidAuth", "spec.auth.accessKey is missing")
+		return ctrl.Result{}, nil
+	}
+	rk.Status.SlotState = slotStateConfiguring
+	account, err := resolveAccount(ctx, cl, r.AccountNamespace)
+	if err != nil {
+		r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	if rk.Spec.TenantNameRef != "" && rk.Spec.TenantNameRef != account.Name {
+		logger.Info("ignoring spec.tenantNameRef; using path-derived account",
+			"specName", rk.Spec.TenantNameRef, "accountName", account.Name)
+	}
+	tenantID, err := resolveTenantID(ctx, cl, account)
+	if err != nil {
+		r.setFailed(ctx, cl, rk, "TenantResolutionFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	if tenantID == "" {
+		r.setFailed(ctx, cl, rk, "AwaitingTenant", "Tenant is not registered in the backend yet; waiting.")
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+
+	resp, err := r.APIClient.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
+		TenantID: tenantID,
+		Provider: "aws",
+		Name:     rk.Name,
+	})
+	if err != nil {
+		r.setFailed(ctx, cl, rk, "RootKeyCreateFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	logger.Info("AWSRootKey registered", "rootKeyID", resp.ID)
+
+	now := metav1.Now()
+	rk.Status.CryptoState = &shared.CryptoState{
+		ID:             resp.ID,
+		LifecycleState: shared.LifecyclePreActive,
+	}
+	rk.Status.OperationID = resp.ID
+	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
+		Success:            true,
+		Message:            "AWS root key registered; awaiting activation.",
+		InternalKeyID:      resp.ID,
+		LastTransitionTime: &now,
+	}
+	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonProcess,
+		Message:            rootKeyRegisteredMessage,
+		ObservedGeneration: rk.Generation,
+	})
+	rk.Status.ObservedGeneration = rk.Generation
+	if err := cl.Status().Update(ctx, rk); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
+func (r *AWSRootKeyReconciler) activate(
+	ctx context.Context, clusterName multicluster.ClusterName, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+	observed *openkcmapi.GetRootKeyResponse,
+) (ctrl.Result, bool, error) {
+	logger := log.FromContext(ctx).WithValues("cluster", clusterName)
+
+	if !meta.IsStatusConditionTrue(rk.Status.Conditions, providerBoundType) {
+		result, err := r.bindProvider(ctx, clusterName, cl, rk)
+		return result, false, err
+	}
+	if observed.LifecycleState != string(shared.LifecycleActive) {
+		if _, err := r.APIClient.ActivateKey(ctx, rk.Status.CryptoState.ID); err != nil {
+			return ctrl.Result{}, false, err
+		}
+		logger.Info("AWSRootKey activation requested", "rootKeyID", rk.Status.CryptoState.ID)
+		return ctrl.Result{RequeueAfter: pollInterval}, false, nil
+	}
+
+	logger.Info("AWSRootKey activated", "rootKeyID", rk.Status.CryptoState.ID)
+	now := metav1.Now()
+	rk.Status.CryptoState.LifecycleState = shared.LifecycleActive
+	rk.Status.CryptoState.Version = observed.Version
+	rk.Status.CryptoState.LastRotatedAt = &now
+	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
+		Success:            true,
+		Message:            "AWS KMS bound and authenticated.",
+		InternalKeyID:      rk.Status.CryptoState.ID,
+		LastTransitionTime: &now,
+	}
+	rk.Status.SlotState = slotStateConfigured
+	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionTrue,
+		Reason:             reasonUpstreamAuthenticated,
+		Message:            "Successfully bound to AWS KMS",
+		ObservedGeneration: rk.Generation,
+	})
+	return ctrl.Result{}, true, nil
+}
+
+func (r *AWSRootKeyReconciler) bindProvider(
+	ctx context.Context, clusterName multicluster.ClusterName, cl client.Client, rk *operationsv1alpha1.AWSRootKey,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).WithValues("cluster", clusterName)
+
+	auth := awsAccessKeyAuth(rk)
+	if auth == nil {
+		r.setFailed(ctx, cl, rk, "InvalidAuth", "spec.auth.accessKey is missing")
+		return ctrl.Result{}, nil
+	}
+	reader, err := r.secretReader(ctx, clusterName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	key, err := readAWSAccessKey(ctx, reader, rk)
+	if err != nil {
+		reason := awsCredentialsFailureReason(err)
+		if reason == "" {
+			return ctrl.Result{}, err
+		}
+		r.setFailed(ctx, cl, rk, reason, err.Error())
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
+
+	err = r.APIClient.BindAWSProvider(ctx, rk.Status.CryptoState.ID, openkcmapi.AWSProvider{
+		Region:          rk.Spec.Region,
+		KeyARN:          rk.Spec.KeyURI,
+		RoleARN:         auth.RoleARN,
+		AccessKeyID:     key.ID,
+		SecretAccessKey: key.Secret,
+	})
+	if openkcmapi.IsNotImplemented(err) {
+		r.setFailed(ctx, cl, rk, reasonProviderUnsupported, err.Error())
+		return ctrl.Result{RequeueAfter: providerUnsupportedRetry}, nil
+	}
+	if err != nil {
+		r.setFailed(ctx, cl, rk, "ProviderBindFailed", err.Error())
+		return ctrl.Result{}, err
+	}
+	logger.Info("AWSRootKey provider bound", "rootKeyID", rk.Status.CryptoState.ID)
+
+	now := metav1.Now()
+	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
+		Success:            true,
+		Message:            "AWS provider bound; awaiting activation.",
+		InternalKeyID:      rk.Status.CryptoState.ID,
+		LastTransitionTime: &now,
+	}
+	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
+		Type:               providerBoundType,
+		Status:             metav1.ConditionTrue,
+		Reason:             reasonProviderBound,
+		Message:            "The provider is bound to the root key in the backend.",
+		ObservedGeneration: rk.Generation,
+	})
+	meta.SetStatusCondition(&rk.Status.Conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reasonProcess,
+		Message:            rootKeyRegisteredMessage,
+		ObservedGeneration: rk.Generation,
+	})
+	if err := cl.Status().Update(ctx, rk); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
+func awsAccessKeyAuth(rk *operationsv1alpha1.AWSRootKey) *operationsv1alpha1.AWSAccessKeyAuth {
+	if rk.Spec.Auth == nil {
+		return nil
+	}
+	return rk.Spec.Auth.AccessKey
+}
+
 // cascadeDeactivate finds all DomainKeys in the same namespace that reference
 // this AWSRootKey via primary or fallback ref, and patches their
 // spec.lifecycle to Deactivated. Each DomainKey controller will then deactivate
@@ -250,7 +356,11 @@ func (r *AWSRootKeyReconciler) handleDeletion(ctx context.Context, cl client.Cli
 		return ctrl.Result{}, nil
 	}
 	if rk.Status.CryptoState != nil && rk.Status.CryptoState.ID != "" {
-		if err := r.APIClient.DeleteRootKey(ctx, rk.Status.CryptoState.ID); err != nil {
+		err := r.APIClient.DeleteRootKey(ctx, rk.Status.CryptoState.ID)
+		switch {
+		case errors.Is(err, errors.ErrUnsupported) || openkcmapi.IsNotImplemented(err):
+			logger.Info("Backend cannot delete root keys; skipping upstream cleanup", "rootKeyID", rk.Status.CryptoState.ID)
+		case err != nil:
 			logger.Error(err, "Failed to delete AWSRootKey in OpenKCM; will retry", "rootKeyID", rk.Status.CryptoState.ID)
 			return ctrl.Result{}, err
 		}
@@ -304,11 +414,17 @@ func (r *AWSRootKeyReconciler) releaseSlotKey(
 	rk.Status.CryptoState = nil
 	rk.Status.OperationID = ""
 	rk.Status.ReconciliationStatus = nil
+	meta.RemoveStatusCondition(&rk.Status.Conditions, providerBoundType)
 	markSlotUnconfigured(&rk.Status.Conditions, &rk.Status.SlotState, rk.Generation)
 	return nil
 }
 
 func (r *AWSRootKeyReconciler) setFailed(ctx context.Context, cl client.Client, rk *operationsv1alpha1.AWSRootKey, reason, message string) {
+	if ready := meta.FindStatusCondition(rk.Status.Conditions, readyType); ready != nil &&
+		ready.Status == metav1.ConditionFalse && ready.Reason == reason && ready.Message == message &&
+		ready.ObservedGeneration == rk.Generation {
+		return
+	}
 	now := metav1.Now()
 	rk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
 		Success:            false,
@@ -341,4 +457,24 @@ func (r *AWSRootKeyReconciler) clusterClient(ctx context.Context, clusterName mu
 		return nil, err
 	}
 	return cluster.GetClient(), nil
+}
+
+func (r *AWSRootKeyReconciler) secretReader(ctx context.Context, clusterName multicluster.ClusterName) (client.Reader, error) {
+	if reader, ok := r.secretReaders.Load(clusterName); ok {
+		return reader.(client.Reader), nil
+	}
+	cluster, err := r.Manager.GetCluster(ctx, clusterName)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := client.New(cluster.GetConfig(), client.Options{
+		Scheme:     cluster.GetScheme(),
+		Mapper:     cluster.GetRESTMapper(),
+		HTTPClient: cluster.GetHTTPClient(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := r.secretReaders.LoadOrStore(clusterName, reader)
+	return actual.(client.Reader), nil
 }
