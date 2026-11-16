@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0 (2026-11-16)
+
+## What's Changed
+* feat!: bind AWS root keys in Krypton with an IAM access key by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/65
+* feat!: run the key flows on the mock: root keys as data, an own L1 per DomainKey by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/72
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.14.1...v0.15.0
+
 ## 0.14.1 (2026-11-13)
 
 ## What's Changed
