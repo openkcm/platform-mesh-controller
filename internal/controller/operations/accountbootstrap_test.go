@@ -60,7 +60,7 @@ func TestIsOperationsAPIBinding(t *testing.T) {
 	assert.False(t, operations.IsOperationsAPIBinding(binding))
 }
 
-func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) {
+func TestAccountBootstrapDefaultsCreateTenantOnly(t *testing.T) {
 	ctx := t.Context()
 	scheme := runtime.NewScheme()
 	require.NoError(t, operationsv1alpha1.AddToScheme(scheme))
@@ -70,13 +70,6 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 	reconciler := &operations.AccountBootstrapReconciler{DefaultRegion: testRegion}
 	accountName := igCleanAccount
 	require.NoError(t, operations.EnsureTenant(
-		reconciler,
-		ctx,
-		cl,
-		testDefaultTenantNamespace,
-		accountName,
-	))
-	require.NoError(t, operations.EnsureDomainKey(
 		reconciler,
 		ctx,
 		cl,
@@ -93,27 +86,9 @@ func TestAccountBootstrapDefaultsCreateTenantAndUnlinkedDomainKey(t *testing.T) 
 	assert.Equal(t, testRegion, tenant.Spec.Region)
 	assert.Equal(t, testBootstrapAnnotationAuto, tenant.Annotations[testBootstrapAnnotation])
 
-	domainKey := &operationsv1alpha1.DomainKey{}
-	require.NoError(t, cl.Get(
-		ctx,
-		types.NamespacedName{Namespace: testDefaultTenantNamespace, Name: accountName},
-		domainKey,
-	))
-	assert.Equal(t, accountName, domainKey.Spec.TenantNameRef)
-	assert.Equal(t, testDomainKeyTypeTeam, domainKey.Spec.Type)
-	assert.Nil(t, domainKey.Spec.PrimaryRootKeyRef)
-	assert.Equal(t, testBootstrapAnnotationAuto, domainKey.Annotations[testBootstrapAnnotation])
-
-	require.NoError(t, operations.EnsureDomainKey(
-		reconciler,
-		ctx,
-		cl,
-		testDefaultTenantNamespace,
-		accountName,
-	))
 	domainKeys := &operationsv1alpha1.DomainKeyList{}
 	require.NoError(t, cl.List(ctx, domainKeys))
-	assert.Len(t, domainKeys.Items, 1)
+	assert.Empty(t, domainKeys.Items)
 }
 
 func TestDomainKeyOpenKCMNameIncludesNamespace(t *testing.T) {

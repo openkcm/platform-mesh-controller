@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	kcpapisv1alpha2 "github.com/kcp-dev/sdk/apis/apis/v1alpha2"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 
@@ -161,7 +162,7 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 	})
 
 	Context("when a bound OpenKCM binding lands in an account workspace", func() {
-		It("mints the Tenant and the singleton DomainKey", func() {
+		It("mints the Tenant and leaves every DomainKey to the customer", func() {
 			b := newBinding(operations.OperationsAPIExportName, kcpapisv1alpha2.APIBindingPhaseBound)
 
 			_, err := reconciler.Reconcile(ctx, requestForBinding(b))
@@ -175,10 +176,8 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 			Expect(tenant.Spec.Region).To(Equal(testRegion))
 
 			dk := &operationsv1alpha1.DomainKey{}
-			Expect(k8sClient.Get(ctx, key, dk)).To(Succeed())
-			Expect(dk.Spec.TenantNameRef).To(Equal(testAccountName))
-			Expect(dk.Spec.PrimaryRootKeyRef).To(BeNil(),
-				"bootstrap must leave the root key unlinked for the user to choose")
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, key, dk))).To(BeTrue(),
+				"bootstrap must not create a DomainKey named after the account")
 		})
 
 		It("is idempotent across repeated reconciles", func() {
@@ -209,7 +208,7 @@ var _ = Describe("AccountBootstrapReconciler", func() {
 					mintedDKs++
 				}
 			}
-			Expect(mintedDKs).To(Equal(1), "the DomainKey is a singleton per account")
+			Expect(mintedDKs).To(BeZero(), "bootstrap must not create a DomainKey on any reconcile")
 		})
 	})
 })
