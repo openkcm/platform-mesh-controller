@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.0 (2026-11-17)
+
+## What's Changed
+* feat: stop creating a DomainKey when an account is bootstrapped by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/73
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.15.0...v0.16.0
+
 ## 0.15.0 (2026-11-16)
 
 ## What's Changed
