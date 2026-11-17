@@ -37,7 +37,6 @@ var (
 	DefaultAccountNamespace        = defaultAccountNamespace
 	DomainKeyOpenKCMName           = domainKeyOpenKCMName
 	EffectiveDesiredLifecycle      = effectiveDesiredLifecycle
-	EnsureDomainKey                = (*AccountBootstrapReconciler).ensureDomainKey
 	EnsureTenant                   = (*AccountBootstrapReconciler).ensureTenant
 	EnsureL1KeyAccess              = ensureL1KeyAccess
 	FindEarlierDomainKey           = (*DomainKeyReconciler).findEarlierDomainKey

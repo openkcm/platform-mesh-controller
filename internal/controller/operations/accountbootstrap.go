@@ -37,15 +37,7 @@ import (
 
 // AccountBootstrapReconciler watches APIBinding events through the
 // operations.openkcm.io APIExport virtual workspace and ensures each account
-// workspace that binds OpenKCM gets the default Tenant CR plus the
-// single Encryption Domain (L2 DomainKey).
-//
-// v0.9.1 revisits the v0.7.3 "Tenant-only" choice. Since v0.8.5 enforces L2
-// singleton and v0.9.1 makes primaryRootKeyRef optional, the bootstrap can
-// safely create the singleton DomainKey without a primary L1 attached - the
-// DomainKey reconciler will sit in Ready=False/AwaitingPrimaryRootKey until
-// the user registers a Root Key and edits the DomainKey to link it (via the
-// Edit affordance in the EncryptionDomainCard).
+// workspace that binds OpenKCM gets the default Tenant CR.
 type AccountBootstrapReconciler struct {
 	Manager mcmanager.Manager
 
@@ -73,7 +65,6 @@ const (
 // +kubebuilder:rbac:groups=apis.kcp.io,resources=apibindings,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core.kcp.io,resources=logicalclusters,verbs=get
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=tenants,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups=operations.openkcm.io,resources=domainkeys,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=operations.openkcm.io,resources=l1keyaccesses,verbs=get;create
 
 // Reconcile fires when an account workspace creates/binds operations.openkcm.io.
@@ -94,7 +85,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 		return ctrl.Result{}, nil
 	}
 	// Deleting bindings drag along terminating CRDs and torn-down
-	// LogicalClusters; trying to create Tenant/DomainKey against them only
+	// LogicalClusters; trying to create the Tenant against them only
 	// produces "CRD is terminating" / "LogicalCluster not found" log noise.
 	// Nothing useful can happen here.
 	if !binding.DeletionTimestamp.IsZero() {
@@ -131,7 +122,7 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	// namespaces in fresh account workspaces; that's OK as long as
 	// "default" already exists (which is the common case under KCP).
 	// Ignore AlreadyExists and Forbidden - if the namespace genuinely
-	// doesn't exist, the subsequent Tenant/DomainKey create will return
+	// doesn't exist, the subsequent Tenant create will return
 	// a clear error.
 	ns := &corev1.Namespace{Name: namespace}
 	if err := cl.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) && !apierrors.IsForbidden(err) {
@@ -144,12 +135,8 @@ func (r *AccountBootstrapReconciler) Reconcile(ctx context.Context, req mcreconc
 	if err := ensureL1KeyAccess(ctx, cl); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.ensureDomainKey(ctx, cl, namespace, accountName); err != nil {
-		return ctrl.Result{}, err
-	}
 
-	logger.Info("bootstrapped OpenKCM account defaults",
-		"tenant", accountName, "domainKey", accountName, "path", path)
+	logger.Info("bootstrapped OpenKCM account defaults", "tenant", accountName, "path", path)
 	return ctrl.Result{}, nil
 }
 
@@ -191,42 +178,6 @@ func (r *AccountBootstrapReconciler) ensureTenant(ctx context.Context, cl client
 		}
 	}
 	if err := cl.Create(ctx, tenant); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// ensureDomainKey idempotently creates the singleton Encryption Domain
-// (L2 DomainKey) for this account. The auto-created DomainKey ships
-// with no primaryRootKeyRef - DomainKeyReconciler sits in
-// Ready=False/AwaitingPrimaryRootKey until the user links a Root Key
-// via the Edit affordance in the OpenKCM UI.
-func (r *AccountBootstrapReconciler) ensureDomainKey(ctx context.Context, cl client.Client, namespace, accountName string) error {
-	existing := &operationsv1alpha1.DomainKey{}
-	err := cl.Get(ctx, types.NamespacedName{Namespace: namespace, Name: accountName}, existing)
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return err
-	}
-
-	dk := &operationsv1alpha1.DomainKey{
-		Name:      accountName,
-		Namespace: namespace,
-		Annotations: map[string]string{
-			bootstrapAnnotation: bootstrapAnnotationAuto,
-		},
-		Spec: operationsv1alpha1.DomainKeySpec{
-			Type:          domainKeyTypeTeam,
-			TenantNameRef: accountName,
-			// PrimaryRootKeyRef intentionally left nil - user links it later.
-		},
-	}
-	if err := cl.Create(ctx, dk); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}
