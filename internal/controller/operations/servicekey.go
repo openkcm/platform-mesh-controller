@@ -236,6 +236,7 @@ func (r *ServiceKeyReconciler) createServiceKey(ctx context.Context, cl client.C
 		Kind:     serviceKeyKind,
 		Name:     serviceKeyOpenKCMName(sk),
 		ParentID: dk.Status.CryptoState.ID,
+		Labels:   kryptonKeyLabels(account, sk.Namespace),
 	})
 	if err != nil {
 		r.setFailedCondition(ctx, cl, sk, "KeyCreateFailed", err.Error())

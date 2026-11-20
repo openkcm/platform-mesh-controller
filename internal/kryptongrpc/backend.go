@@ -93,6 +93,7 @@ func (b *Backend) CreateKey(
 		Kind:     kind,
 		Name:     req.Name,
 		ParentID: parentKeyID,
+		Labels:   req.Labels,
 	})
 	if err != nil {
 		return nil, err
@@ -170,6 +171,7 @@ func (b *Backend) CreateDEK(
 		Kind:     dataEncryptionKeyLevel,
 		Name:     req.Name,
 		ParentID: req.ServiceKeyID,
+		Labels:   req.Labels,
 	})
 	if err != nil {
 		return nil, err

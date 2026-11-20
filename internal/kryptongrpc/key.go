@@ -8,6 +8,7 @@ import (
 	"github.com/openkcm/platform-mesh-controller/api/shared"
 	"github.com/openkcm/platform-mesh-controller/internal/openkcmapi"
 	"google.golang.org/grpc"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -35,6 +36,7 @@ func (c *KeyClient) AnnounceKey(ctx context.Context, req openkcmapi.CreateKeyReq
 		Kind:     req.Kind,
 		Name:     req.Name,
 		ParentId: req.ParentID,
+		Labels:   req.Labels,
 	})
 	if err != nil {
 		return nil, translate("AnnounceKey", err)
@@ -42,6 +44,10 @@ func (c *KeyClient) AnnounceKey(ctx context.Context, req openkcmapi.CreateKeyReq
 	if resp.GetKey() == nil {
 		return nil, fmt.Errorf("AnnounceKey: krypton returned no key")
 	}
+	log.FromContext(ctx).Info("Krypton AnnounceKey",
+		"tenantID", req.TenantID, "kind", req.Kind, "name", req.Name, "parentID", req.ParentID,
+		"keyID", resp.GetKey().GetId(), "lifecycle", resp.GetKey().GetLifeCycleState(),
+		"processing", processingState(resp.GetKey()))
 	return &openkcmapi.CreateKeyResponse{
 		ID:              resp.GetKey().GetId(),
 		ProcessingState: processingState(resp.GetKey()),
@@ -73,11 +79,12 @@ func (c *KeyClient) GetKey(ctx context.Context, id string, tenantID string) (*op
 }
 
 func (c *KeyClient) ActivateKey(ctx context.Context, id string, tenantID string) (*openkcmapi.ActivateKeyResponse, error) {
-	_, err := c.keys.ActivateKey(ctx, &kryptonkeys.ActivateKeyRequest{
+	resp, err := c.keys.ActivateKey(ctx, &kryptonkeys.ActivateKeyRequest{
 		Id:       id,
 		TenantId: tenantID,
 	})
 	if err != nil {
+		log.FromContext(ctx).Error(err, "Krypton ActivateKey failed", "tenantID", tenantID, "keyID", id)
 		return nil, translate("ActivateKey", err)
 	}
 
@@ -85,9 +92,13 @@ func (c *KeyClient) ActivateKey(ctx context.Context, id string, tenantID string)
 	if err != nil {
 		return nil, err
 	}
+	log.FromContext(ctx).Info("Krypton ActivateKey accepted (an asynchronous job)",
+		"tenantID", tenantID, "keyID", id, "jobGroupID", resp.GetJobGroupId(),
+		"lifecycle", got.LifecycleState, "processing", got.ProcessingState)
 	return &openkcmapi.ActivateKeyResponse{
-		ID:             got.ID,
-		LifecycleState: got.LifecycleState,
+		ID:              got.ID,
+		LifecycleState:  got.LifecycleState,
+		ProcessingState: got.ProcessingState,
 	}, nil
 }
 

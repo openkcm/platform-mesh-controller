@@ -205,15 +205,21 @@ var _ = Describe("DomainKeyReconciler", func() {
 
 		drive(reconciler, dk, 4)
 
+		labels := map[string]string{
+			"operations.openkcm.io/account":   testAccountName,
+			"operations.openkcm.io/namespace": dk.Namespace,
+		}
 		Expect(backend.createRootKeyCalls).To(ConsistOf(openkcmapi.CreateRootKeyRequest{
 			TenantID: testTenantID,
 			Name:     operations.DomainKeyOpenKCMName(dk) + ".l1",
+			Labels:   labels,
 		}))
 		Expect(backend.createKeyCalls).To(ConsistOf(openkcmapi.CreateKeyRequest{
 			TenantID: testTenantID,
 			Kind:     "L2",
 			Name:     operations.DomainKeyOpenKCMName(dk),
 			ParentID: testL1KeyID,
+			Labels:   labels,
 		}))
 		Expect(backend.activateKeyCalls).To(BeEmpty())
 
