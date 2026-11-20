@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	testKeyID       = "k1"
-	testKeyTenantID = "tenant-1"
+	testKeyID         = "k1"
+	testKeyTenantID   = "tenant-1"
+	testKeyProcessing = "pending"
 )
 
 type stubKeyService struct {
@@ -60,7 +61,7 @@ func TestAnnounceKeyTranslatesProcessingState(t *testing.T) {
 		want    string
 	}{
 		{"completed maps to ready", kryptongrpc.KryptonProcessingCompleted, openkcmapi.ProcessingStateReady},
-		{"anything else passes through", "pending", "pending"},
+		{"anything else passes through", testKeyProcessing, testKeyProcessing},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -140,4 +141,37 @@ func TestActivateKeyReadsBackStateAfterEmptyResponse(t *testing.T) {
 	// then
 	require.NoError(t, err)
 	assert.Equal(t, string(shared.LifecycleActive), resp.LifecycleState, "LifecycleState")
+}
+
+func TestActivateKeyReportsAKeyThatIsActiveButStillProcessing(t *testing.T) {
+	tests := []struct {
+		name    string
+		krypton string
+		want    string
+	}{
+		{"the job is pending", testKeyProcessing, testKeyProcessing},
+		{"the job is done", kryptongrpc.KryptonProcessingCompleted, openkcmapi.ProcessingStateReady},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newKeyClientAgainst(t, &stubKeyService{
+				activateFn: func(*kryptonkeys.ActivateKeyRequest) (*kryptonkeys.ActivateKeyResponse, error) {
+					return &kryptonkeys.ActivateKeyResponse{JobGroupId: "job-1"}, nil
+				},
+				getFn: func(*kryptonkeys.GetKeyRequest) (*kryptonkeys.GetKeyResponse, error) {
+					return &kryptonkeys.GetKeyResponse{Key: &kryptonkeys.Key{
+						Id:                 testKeyID,
+						LifeCycleState:     kryptongrpc.KryptonKeyLifecycleActive,
+						KeyProcessingState: &kryptonkeys.KeyProcessingState{Status: tt.krypton},
+					}}, nil
+				},
+			})
+
+			resp, err := c.ActivateKey(t.Context(), testKeyID, testKeyTenantID)
+
+			require.NoError(t, err)
+			assert.Equal(t, string(shared.LifecycleActive), resp.LifecycleState, "LifecycleState")
+			assert.Equal(t, tt.want, resp.ProcessingState, "ProcessingState")
+		})
+	}
 }

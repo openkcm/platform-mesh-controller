@@ -67,10 +67,11 @@ type GetTenantResponse struct {
 
 // CreateKeyRequest is the request body for creating a key.
 type CreateKeyRequest struct {
-	TenantID string `json:"tenantId"`
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-	ParentID string `json:"parentId,omitempty"`
+	TenantID string            `json:"tenantId"`
+	Kind     string            `json:"kind"`
+	Name     string            `json:"name"`
+	ParentID string            `json:"parentId,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
 }
 
 // CreateKeyResponse is the response body for creating a key.
@@ -90,9 +91,10 @@ type GetKeyResponse struct {
 
 // ActivateKeyResponse is the response body for activating a key.
 type ActivateKeyResponse struct {
-	ID             string `json:"id"`
-	LifecycleState string `json:"lifecycleState"`
-	Version        int32  `json:"version"`
+	ID              string `json:"id"`
+	LifecycleState  string `json:"lifecycleState"`
+	ProcessingState string `json:"processingState,omitempty"`
+	Version         int32  `json:"version"`
 }
 
 // CreateRootKeyRequest is the request body for registering an L1 root key.
@@ -102,6 +104,7 @@ type CreateRootKeyRequest struct {
 	Provider string            `json:"provider"`
 	Name     string            `json:"name"`
 	Config   map[string]string `json:"config,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
 }
 
 // CreateRootKeyResponse is the response body for registering a root key.
@@ -139,6 +142,7 @@ type CreateDEKRequest struct {
 	ServiceKeyID   string            `json:"serviceKeyId"`
 	Name           string            `json:"name"`
 	KMIPAttributes map[string]string `json:"kmipAttributes,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
 }
 
 // CreateDEKResponse is the response body for creating an L4 data encryption key.

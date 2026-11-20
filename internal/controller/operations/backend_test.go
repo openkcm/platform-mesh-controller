@@ -171,7 +171,9 @@ func (f *testBackend) GetRootKey(_ context.Context, id string) (*openkcmapi.GetR
 	if lifecycle == "" {
 		lifecycle = shared.LifecyclePreActive
 	}
-	return &openkcmapi.GetRootKeyResponse{ID: id, LifecycleState: string(lifecycle)}, nil
+	return &openkcmapi.GetRootKeyResponse{
+		ID: id, ProcessingState: openkcmapi.ProcessingStateReady, LifecycleState: string(lifecycle),
+	}, nil
 }
 func (f *testBackend) DeleteRootKey(context.Context, string) error { return nil }
 func (f *testBackend) CreateDEK(

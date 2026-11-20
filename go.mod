@@ -8,7 +8,7 @@ require (
 	github.com/kcp-dev/sdk v0.32.0
 	github.com/onsi/ginkgo/v2 v2.33.0
 	github.com/onsi/gomega v1.44.0
-	github.com/openkcm/krypton v0.3.0
+	github.com/openkcm/krypton v0.3.1-0.20261119113509-b0ad9404b64f
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/grpc v1.85.0
 	gopkg.in/yaml.v3 v3.0.1

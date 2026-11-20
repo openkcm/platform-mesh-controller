@@ -1800,11 +1800,9 @@ spec:
             primaryRootKeyRef:
               description: 'PrimaryRootKeyRef points at the L1 root key that backs this
 
-                DomainKey. Polymorphic across the L1 kinds. Optional so the
+                DomainKey. Polymorphic across the L1 kinds. Optional so a DomainKey
 
-                AccountBootstrapReconciler can auto-create the singleton DomainKey
-
-                at APIBinding creation before any L1 has been registered. The
+                can be created before any L1 is linked. The
 
                 DomainKey reconciler surfaces Ready=False with reason
 

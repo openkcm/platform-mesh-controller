@@ -103,9 +103,8 @@ spec:
               primaryRootKeyRef:
                 description: |-
                   PrimaryRootKeyRef points at the L1 root key that backs this
-                  DomainKey. Polymorphic across the L1 kinds. Optional so the
-                  AccountBootstrapReconciler can auto-create the singleton DomainKey
-                  at APIBinding creation before any L1 has been registered. The
+                  DomainKey. Polymorphic across the L1 kinds. Optional so a DomainKey
+                  can be created before any L1 is linked. The
                   DomainKey reconciler surfaces Ready=False with reason
                   AwaitingPrimaryRootKey while the field is unset; once the user
                   links an Active L1 via Edit (or kubectl), reconciliation resumes.
