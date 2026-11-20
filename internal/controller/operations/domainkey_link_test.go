@@ -31,7 +31,9 @@ type unsupportedL1Backend struct {
 	deleteErr error
 }
 
-func (unsupportedL1Backend) CreateRootKey(context.Context, openkcmapi.CreateRootKeyRequest) (*openkcmapi.CreateRootKeyResponse, error) {
+func (unsupportedL1Backend) CreateRootKey(
+	context.Context, openkcmapi.CreateRootKeyRequest,
+) (*openkcmapi.CreateRootKeyResponse, error) {
 	return nil, errors.ErrUnsupported
 }
 
@@ -39,7 +41,9 @@ func (unsupportedL1Backend) GetRootKey(context.Context, string) (*openkcmapi.Get
 	return nil, errors.ErrUnsupported
 }
 
-func (unsupportedL1Backend) CreateProvider(context.Context, string, openkcmapi.CreateProviderRequest) (*openkcmapi.GetRootKeyResponse, error) {
+func (unsupportedL1Backend) CreateProvider(
+	context.Context, string, openkcmapi.CreateProviderRequest,
+) (*openkcmapi.GetRootKeyResponse, error) {
 	return nil, errors.ErrUnsupported
 }
 

@@ -107,7 +107,8 @@ func (r *DomainKeyReconciler) syncRootKeyLink(
 	if !wantLinked {
 		if err := linker.RemoveProvider(ctx, dk.Status.L1KeyID); err != nil {
 			if errors.Is(err, errors.ErrUnsupported) {
-				r.recordRootKeyChange(ctx, cl, dk, "Removing the root key is not supported by this backend yet; the DomainKey stays linked.")
+				r.recordRootKeyChange(ctx, cl, dk,
+					"Removing the root key is not supported by this backend yet; the DomainKey stays linked.")
 				return ctrl.Result{}, false, nil
 			}
 			return ctrl.Result{}, true, err

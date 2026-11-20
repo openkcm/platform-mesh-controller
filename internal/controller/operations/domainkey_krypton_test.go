@@ -81,7 +81,9 @@ func (b *kryptonLikeBackend) completeL2() {
 func (b *kryptonLikeBackend) GetRootKey(_ context.Context, id string) (*openkcmapi.GetRootKeyResponse, error) {
 	b.state.Lock()
 	defer b.state.Unlock()
-	return &openkcmapi.GetRootKeyResponse{ID: id, ProcessingState: b.l1Processing, LifecycleState: string(b.l1Lifecycle)}, nil
+	return &openkcmapi.GetRootKeyResponse{
+		ID: id, ProcessingState: b.l1Processing, LifecycleState: string(b.l1Lifecycle),
+	}, nil
 }
 
 func (b *kryptonLikeBackend) GetKey(_ context.Context, id string) (*openkcmapi.GetKeyResponse, error) {
@@ -226,7 +228,8 @@ var _ = Describe("DomainKeyReconciler linking through a backend that reports no 
 		Expect(backend.l2Activations).To(ConsistOf(testKeyID))
 		activating := reloadDomainKey(dk.Name)
 		Expect(activating.Status.CryptoState.LifecycleState).To(Equal(shared.LifecyclePreActive),
-			"Krypton reports the L2 active as soon as the job is accepted, but the key is not ready until its processing completes")
+			"Krypton reports the L2 active as soon as the job is accepted, "+
+				"but the key is not ready until its processing completes")
 		ready := condition(activating, operations.ReadyType)
 		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
 		Expect(ready.Reason).To(Equal("Activating"))
