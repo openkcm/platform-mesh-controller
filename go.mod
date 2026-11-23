@@ -4,19 +4,19 @@ go 1.27.1
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/kcp-dev/multicluster-provider v0.9.0
-	github.com/kcp-dev/sdk v0.32.0
-	github.com/onsi/ginkgo/v2 v2.33.0
+	github.com/kcp-dev/multicluster-provider v0.9.1
+	github.com/kcp-dev/sdk v0.33.6
+	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
 	github.com/openkcm/krypton v0.3.1-0.20261119113509-b0ad9404b64f
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/grpc v1.85.0
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.36.1
-	k8s.io/apimachinery v0.36.1
-	k8s.io/client-go v0.36.1
-	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/multicluster-runtime v0.24.1
+	k8s.io/api v0.37.2
+	k8s.io/apimachinery v0.37.2
+	k8s.io/client-go v0.37.2
+	sigs.k8s.io/controller-runtime v0.25.3
+	sigs.k8s.io/multicluster-runtime v0.25.2
 )
 
 require (
@@ -65,7 +65,7 @@ require (
 	github.com/hashicorp/go-sockaddr v1.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-7 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/kcp-dev/apimachinery/v2 v2.32.0 // indirect
+	github.com/kcp-dev/apimachinery/v2 v2.33.6 // indirect
 	github.com/kcp-dev/logicalcluster/v3 v3.0.5 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
@@ -120,7 +120,7 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	k8s.io/apiextensions-apiserver v0.36.0 // indirect
+	k8s.io/apiextensions-apiserver v0.37.0 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
