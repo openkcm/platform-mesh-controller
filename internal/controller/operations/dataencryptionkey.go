@@ -231,6 +231,7 @@ func (r *DataEncryptionKeyReconciler) createDataEncryptionKey(
 		ServiceKeyID:   sk.Status.CryptoState.ID,
 		Name:           dataEncryptionKeyOpenKCMName(dek),
 		KMIPAttributes: attrs,
+		Labels:         kryptonKeyLabels(account, dek.Namespace),
 	})
 	if err != nil {
 		r.setFailed(ctx, cl, dek, "DEKCreateFailed", err.Error())

@@ -234,6 +234,7 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 		l1Resp, err := r.L1Keys.CreateRootKey(ctx, openkcmapi.CreateRootKeyRequest{
 			TenantID: tenantID,
 			Name:     domainKeyL1Name(dk),
+			Labels:   kryptonKeyLabels(account, dk.Namespace),
 		})
 		if err != nil {
 			r.setFailedCondition(ctx, cl, dk, "KeyCreateFailed", err.Error())
@@ -247,6 +248,7 @@ func (r *DomainKeyReconciler) createDomainKey(ctx context.Context, cl client.Cli
 		Kind:     domainKeyKind,
 		Name:     domainKeyOpenKCMName(dk),
 		ParentID: l1KeyID,
+		Labels:   kryptonKeyLabels(account, dk.Namespace),
 	})
 	if err != nil {
 		r.setFailedCondition(ctx, cl, dk, "KeyCreateFailed", err.Error())
@@ -300,40 +302,77 @@ func domainKeyOpenKCMName(dk *operationsv1alpha1.DomainKey) string {
 func (r *DomainKeyReconciler) activatePreActiveDomainKey(
 	ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey,
 ) (ctrl.Result, bool, error) {
-	logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx).WithValues("keyID", dk.Status.CryptoState.ID)
 	keyID := dk.Status.CryptoState.ID
 
 	keyResp, err := r.APIClient.GetKey(ctx, keyID)
 	if err != nil {
 		return ctrl.Result{}, true, err
 	}
-	if keyResp.ProcessingState != processingStateReady {
+	switch keyResp.ProcessingState {
+	case processingStateReady:
+	case processingStateFailed:
+		r.setFailedCondition(ctx, cl, dk, "KeyProcessingFailed",
+			"The backend failed to process the DomainKey; see its log.")
+		return ctrl.Result{RequeueAfter: pollInterval}, true, nil
+	default:
+		logger.Info("Waiting for the backend to finish processing the L2",
+			"processing", keyResp.ProcessingState, "lifecycle", keyResp.LifecycleState)
 		return ctrl.Result{RequeueAfter: pollInterval}, true, nil
 	}
 
-	l1Active := false
-	if dk.Status.L1KeyID != "" {
-		l1, err := r.L1Keys.GetRootKey(ctx, dk.Status.L1KeyID)
+	state := shared.LifecycleState(keyResp.LifecycleState)
+	var version int32
+	if state == shared.LifecycleActive {
+		logger.Info("The backend reports the L2 active and its processing complete: its key material is generated, " +
+			"sealed through the root key provider and stored")
+	} else {
+		l1Active, l1Ready := false, false
+		if dk.Status.L1KeyID != "" {
+			l1, err := r.L1Keys.GetRootKey(ctx, dk.Status.L1KeyID)
+			if err != nil {
+				return ctrl.Result{}, true, err
+			}
+			l1Active = l1.LifecycleState == string(shared.LifecycleActive)
+			l1Ready = l1.ProcessingState == processingStateReady
+		}
+		if !l1Active || !l1Ready {
+			if recordedLink(dk) != nil {
+				logger.Info("The root key is linked; waiting for the L1 activation before activating the L2")
+				r.setPendingCondition(ctx, cl, dk, reasonAwaitingRootKeyActivation,
+					"The root key is linked; waiting for the backend to activate the L1.")
+				return ctrl.Result{RequeueAfter: pollInterval}, true, nil
+			}
+			r.setFailedCondition(ctx, cl, dk, reasonUnconfigured,
+				"The DomainKey has no root key provider yet; link a Root Key to activate it.")
+			return ctrl.Result{}, true, nil
+		}
+
+		logger.Info("The L1 is active; asking the backend to activate the L2 (an asynchronous job that generates " +
+			"the key material, seals it through the root key provider and stores it)")
+		activateResp, err := r.APIClient.ActivateKey(ctx, keyID)
 		if err != nil {
 			return ctrl.Result{}, true, err
 		}
-		l1Active = l1.LifecycleState == string(shared.LifecycleActive)
-	}
-	if !l1Active {
-		r.setFailedCondition(ctx, cl, dk, reasonUnconfigured,
-			"The DomainKey has no root key provider yet; link a Root Key to activate it.")
-		return ctrl.Result{}, true, nil
+		state = shared.LifecycleState(activateResp.LifecycleState)
+		version = activateResp.Version
+		stillProcessing := activateResp.ProcessingState != "" && activateResp.ProcessingState != processingStateReady
+		if state != shared.LifecycleActive || stillProcessing {
+			logger.Info("The backend accepted the L2 activation job",
+				"lifecycle", activateResp.LifecycleState, "processing", activateResp.ProcessingState)
+			r.setPendingCondition(ctx, cl, dk, reasonActivating,
+				"Activation requested; waiting for the backend to generate the key material, "+
+					"seal it with the root key provider and store it.")
+			return ctrl.Result{RequeueAfter: pollInterval}, true, nil
+		}
 	}
 
-	activateResp, err := r.APIClient.ActivateKey(ctx, keyID)
-	if err != nil {
-		return ctrl.Result{}, true, err
-	}
-
-	logger.Info("DomainKey activated in OpenKCM", "keyID", keyID)
+	logger.Info("DomainKey activated in OpenKCM")
 	now := metav1.Now()
-	dk.Status.CryptoState.LifecycleState = shared.LifecycleState(activateResp.LifecycleState)
-	dk.Status.CryptoState.Version = activateResp.Version
+	dk.Status.CryptoState.LifecycleState = state
+	if version != 0 {
+		dk.Status.CryptoState.Version = version
+	}
 	dk.Status.CryptoState.LastRotatedAt = &now
 	dk.Status.OperationID = keyID
 	dk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
@@ -357,6 +396,36 @@ func (r *DomainKeyReconciler) activatePreActiveDomainKey(
 		ObservedGeneration: dk.Generation,
 	})
 	return ctrl.Result{}, false, nil
+}
+
+func (r *DomainKeyReconciler) setPendingCondition(
+	ctx context.Context, cl client.Client, dk *operationsv1alpha1.DomainKey, reason, message string,
+) {
+	changed := meta.SetStatusCondition(&dk.Status.Conditions, metav1.Condition{
+		Type:               readyType,
+		Status:             metav1.ConditionFalse,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: dk.Generation,
+	})
+	if dk.Status.ReconciliationStatus == nil || !dk.Status.ReconciliationStatus.Success ||
+		dk.Status.ReconciliationStatus.Message != message {
+		now := metav1.Now()
+		dk.Status.ReconciliationStatus = &shared.ReconciliationStatus{
+			Success:            true,
+			Message:            message,
+			InternalKeyID:      dk.Status.CryptoState.ID,
+			LastTransitionTime: &now,
+		}
+		changed = true
+	}
+	if dk.Status.ObservedGeneration != dk.Generation {
+		dk.Status.ObservedGeneration = dk.Generation
+		changed = true
+	}
+	if changed {
+		_ = cl.Status().Update(ctx, dk)
+	}
 }
 
 type rootKeyPendingError struct {

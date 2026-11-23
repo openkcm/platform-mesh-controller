@@ -172,6 +172,10 @@ var _ = Describe("ServiceKeyReconciler", func() {
 			Kind:     "L3",
 			Name:     operations.ServiceKeyOpenKCMName(serviceKey),
 			ParentID: serviceKeyParentKeyID,
+			Labels: map[string]string{
+				"operations.openkcm.io/account":   testAccountName,
+				"operations.openkcm.io/namespace": serviceKey.Namespace,
+			},
 		}))
 		Expect(backend.activateKeyCalls).To(ConsistOf(testKeyID))
 		reloaded := reloadServiceKey()
