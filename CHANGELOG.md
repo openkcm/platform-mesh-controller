@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.0 (2026-11-23)
+
+## What's Changed
+* feat: link domain keys to aws root keys in krypton by @ykld-work in https://github.com/openkcm/platform-mesh-controller/pull/75
+
+
+**Full Changelog**: https://github.com/openkcm/platform-mesh-controller/compare/v0.16.0...v0.17.0
+
 ## 0.16.0 (2026-11-17)
 
 ## What's Changed
